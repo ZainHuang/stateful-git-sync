@@ -44,7 +44,7 @@ export class PreviewModal extends Modal {
 
   onOpen(): void {
     this.modalEl.addClass('lms-modal', 'lms-preview-modal');
-    this.setTitle('VaultBridge');
+    this.setTitle('Stateful Git Sync');
     this.releaseViewport = keepModalAboveKeyboard(this);
     void this.load();
   }

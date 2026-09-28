@@ -6,12 +6,12 @@ export async function verifyBrand({ page, remote, preview, execute, close, state
     return { id: plugin.manifest.id, name: plugin.manifest.name,
       commands: Object.values(app.commands.commands).filter(c => c.id.startsWith('local-mirror-sync:')).map(c => c.name) };
   });
-  assert.equal(metadata.id, 'local-mirror-sync'); assert.equal(metadata.name, 'VaultBridge');
-  assert(metadata.commands.every(name => name.startsWith('VaultBridge:')));
+  assert.equal(metadata.id, 'local-mirror-sync'); assert.equal(metadata.name, 'Stateful Git Sync');
+  assert(metadata.commands.every(name => name.startsWith('Stateful Git Sync:')));
   await preview();
   const ui = await surface('.lms-modal');
-  assert.equal(await ui.locator('.lms-modal .modal-title').innerText(), 'VaultBridge');
-  await screenshot('vaultbridge-preview');
+  assert.equal(await ui.locator('.lms-modal .modal-title').innerText(), 'Stateful Git Sync');
+  await screenshot('stateful-git-sync-preview');
   await execute(); await close();
   const before = await state(); assert(before.baseManifest);
   const saved = await page.evaluate(async () => {
@@ -27,14 +27,14 @@ export async function verifyBrand({ page, remote, preview, execute, close, state
   const requests = remote.calls.length;
   await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openDashboard());
   const dashboard = await surface('.lms-dashboard');
-  assert(await dashboard.getByText('VaultBridge Dashboard', { exact: true }).count());
-  await screenshot('vaultbridge-dashboard');
+  assert(await dashboard.getByText('Stateful Git Sync Dashboard', { exact: true }).count());
+  await screenshot('stateful-git-sync-dashboard');
   assert.equal(remote.calls.length, requests);
   await page.evaluate(() => { app.setting.open(); app.setting.openTabById('local-mirror-sync'); });
   const settings = await surface('.lms-device-setting');
-  assert(await settings.getByRole('heading', { name: 'VaultBridge', exact: true }).count());
-  await screenshot('vaultbridge-settings');
+  assert(await settings.getByRole('heading', { name: 'Stateful Git Sync', exact: true }).count());
+  await screenshot('stateful-git-sync-settings');
   await page.evaluate(() => app.setting.close());
-  report.checks.push('VaultBridge display name, command prefix, Preview, Dashboard and Settings verified in production Obsidian');
+  report.checks.push('Stateful Git Sync display name, command prefix, Preview, Dashboard and Settings verified in production Obsidian');
   report.checks.push('Same plugin ID reload preserves exact settings bytes, deviceId and BASE; opening Dashboard issues no GitHub requests');
 }

@@ -16,7 +16,7 @@ const rules = [
 ];
 const findings = [];
 for (const path of paths) if (forbidden.test(path) || /(?:REPORT\.md|INTERNAL_CHANGELOG\.md|PUBLISH_LIFECYCLE_ROOT_CAUSE\.md)$/.test(path)) findings.push({ path, rule: 'private-or-generated-path' });
-const bundles = ['main.js', 'dist/vaultbridge/main.js'];
+const bundles = ['main.js', 'dist/stateful-git-sync/main.js'];
 for (const bundle of bundles) if (!existsSync(bundle)) throw new Error(`Missing build: ${bundle}`);
 for (const path of [...paths, ...bundles]) {
   const content = candidates || bundles.includes(path) ? readFileSync(path, 'utf8') : execFileSync('git', ['show', `:${path}`], { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });

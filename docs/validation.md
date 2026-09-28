@@ -1,4 +1,13 @@
-# VaultBridge validation
+# Stateful Git Sync validation
+
+## 1.1.16
+
+- Branding compatibility RED first failed because the manifest still exposed VaultBridge. The implementation then changed only display/distribution branding while retaining plugin ID `local-mirror-sync` and all state paths.
+- `npm run check` passed TypeScript, ESLint, all 716 tests across 35 files and the mobile-safe build. The public candidate audit scanned 142 files and both bundles with zero findings.
+- Isolated Windows Obsidian branding validation passed Preview, Dashboard and Settings with zero console errors. Visual inspection found no clipping or overflow from the longer name; reload preserved exact settings bytes, deviceId and BASE, and opening Dashboard made no GitHub request.
+- The mobile keyboard suite passed every viewport/keyboard/safe-area bound with no overflow. The full V1 suite passed all 13 lifecycle checks with zero console errors, including 390px Push/Pull, conflict, delete, Bootstrap, Recovery and both Legacy Adoption authorities; branch updates recorded no `force:true`.
+- The first full V1 launch overlapped the keyboard suite and correctly failed its isolated-Vault ownership assertion before reaching plugin logic. A serial rerun passed. Tests and generated Vaults never targeted the daily Vault.
+- The release ZIP contains exactly `main.js`, `manifest.json` and `styles.css` under the compatible `local-mirror-sync` directory. SHA-256 verification passed; `stateful-git-sync-1.1.16.zip` is `4d1cdc504eac8acc71b2964cdead23df61863375d783a5e186f8901d405e7333`.
 
 ## 1.1.15
 

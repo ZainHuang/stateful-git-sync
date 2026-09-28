@@ -117,7 +117,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     this.addCommand({ id: 'recover-sync', name: 'Recover interrupted sync', callback: () => this.openRecovery() });
     this.addCommand({ id: 'dashboard', name: 'Open Dashboard', callback: () => { void this.openDashboard(); } });
     this.addCommand({ id: 'sync-history', name: 'Sync History', callback: () => { void this.openDashboard(true); } });
-    this.activityRibbon = this.addRibbonIcon('refresh-cw', 'VaultBridge activity', () => this.openActivity());
+    this.activityRibbon = this.addRibbonIcon('refresh-cw', 'Stateful Git Sync activity', () => this.openActivity());
     this.activityRibbon.addClass('lms-activity-ribbon');
     this.refreshDashboard();
     // Opening the app does not scan. Saved Auto Sync reacts to subsequent Vault events.
@@ -149,7 +149,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     const status = this.activityStatus();
     for (const entry of [this.statusBar, this.activityRibbon]) {
       if (!entry) continue;
-      const label = `VaultBridge: ${status.label}`;
+      const label = `Stateful Git Sync: ${status.label}`;
       entry.setAttribute('aria-label', label); entry.setAttribute('title', label);
       entry.toggleClass('lms-activity-running', status.animated);
       entry.toggleClass('lms-activity-attention', status.destination !== 'activity' || status.label === 'Error');

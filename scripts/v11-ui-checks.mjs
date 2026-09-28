@@ -22,7 +22,7 @@ export async function verifyV11({ page, remote, report, runDir, preview, sync, c
   await s.getByRole('textbox', { name: 'Device name', exact: true }).fill('Windows-PC');
   await s.screenshot({ path: join(runDir, 'v11-02-settings-default-off.png') }); report.screenshots.push('v11-02-settings-default-off.png');
   await s.getByRole('button', { name: 'Save settings', exact: true }).click();
-  await s.getByText('VaultBridge settings saved.', { exact: true }).waitFor();
+  await s.getByText('Stateful Git Sync settings saved.', { exact: true }).waitFor();
   await page.evaluate(() => app.setting.close());
   await preview(); await sync(); await close(); await dashboard();
   assert.match(await page.locator('.lms-dashboard:visible .lms-dashboard-health').innerText(), /Healthy/);

@@ -8,7 +8,7 @@ export class SettingsTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl('h2', { text: 'VaultBridge' });
+    containerEl.createEl('h2', { text: 'Stateful Git Sync' });
     containerEl.createEl('p', { text: 'V1.1 · Stateful Three-Way Sync. Review Preview or enable safe Auto Sync. Every sync is verified.' });
     new Setting(containerEl).setName('Sync Dashboard').setDesc('Repository health, file counts, devices and local history. Opens cached state without GitHub requests.')
       .addButton(button => button.setButtonText('Open Dashboard').onClick(() => { void this.plugin.openDashboard(); }))
@@ -87,7 +87,7 @@ export class SettingsTab extends PluginSettingTab {
         }
         await this.plugin.saveSettings(draft, token);
         token = undefined;
-        if (connected()) { this.display(); new Notice('VaultBridge settings saved.'); }
+        if (connected()) { this.display(); new Notice('Stateful Git Sync settings saved.'); }
       } catch (error) { if (connected()) feedback.setText(safeError(error)); }
       finally { if (connected()) button.setDisabled(false); }
     }));

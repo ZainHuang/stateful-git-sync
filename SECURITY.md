@@ -1,8 +1,8 @@
-# VaultBridge security and data boundaries
+# Stateful Git Sync security and data boundaries
 
 ## Credentials and disclosure
 
-Use a private GitHub repository for notes and a fine-grained token limited to that repository with Contents read/write. Store it in VaultBridge Settings on each device. Obsidian SecretStorage is preferred; when unavailable, explicit saving uses local plugin `data.json`. This fallback is not encrypted by VaultBridge. Both the plugin directory and its state are hard-excluded from synchronization.
+Use a private GitHub repository for notes and a fine-grained token limited to that repository with Contents read/write. Store it in Stateful Git Sync Settings on each device. Obsidian SecretStorage is preferred; when unavailable, explicit saving uses local plugin `data.json`. This fallback is not encrypted by Stateful Git Sync. Both the plugin directory and its state are hard-excluded from synchronization.
 
 Do not post tokens, private notes, raw transaction journals, `data.json` or complete diagnostic logs in public issues. If a token is exposed, revoke it in GitHub and save a replacement on the affected device. Public bug reports should use synthetic files and redacted error codes. For a vulnerability, use the repository's **Security → Report a vulnerability** private reporting channel when available; do not disclose an exploit or private data in an issue.
 

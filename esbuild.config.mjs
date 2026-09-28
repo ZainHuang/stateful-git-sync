@@ -18,7 +18,7 @@ const imports = Object.values(result.metafile.outputs).flatMap(output => output.
 if (imports.some(item => item.path !== 'obsidian')) throw new Error('Unexpected runtime external dependency');
 const output = await readFile('main.js', 'utf8');
 if (/\b(?:Buffer|child_process|simple-git)\b|require\(["'](?:node:|fs["']|crypto["'])/.test(output)) throw new Error('Node-only API in mobile bundle');
-await mkdir('dist/vaultbridge', { recursive: true });
-for (const file of ['main.js', 'manifest.json', 'styles.css']) await copyFile(file, `dist/vaultbridge/${file}`);
+await mkdir('dist/stateful-git-sync', { recursive: true });
+for (const file of ['main.js', 'manifest.json', 'styles.css']) await copyFile(file, `dist/stateful-git-sync/${file}`);
 await writeFile('dist/build-meta.json', JSON.stringify(result.metafile, null, 2));
 console.log(`Built mobile-safe bundle (${output.length} chars); external: obsidian only.`);

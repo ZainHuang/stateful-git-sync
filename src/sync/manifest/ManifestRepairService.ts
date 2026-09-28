@@ -99,7 +99,7 @@ export class ManifestRepairService {
         if (await this.github.head() !== reviewedHead) throw fail('REMOTE_HEAD_CHANGED', 'Remote changed before candidate construction.');
         const sha = await this.github.upload(new TextEncoder().encode(JSON.stringify(manifest)));
         const tree = await this.github.create('trees', { base_tree: t.originalTree, tree: [{ path: MANIFEST_PATH, type: 'blob', mode: '100644', sha }] });
-        t.candidate = await this.github.create('commits', { tree, parents: [t.originalHead], message: `VaultBridge Manifest repair generation ${manifest.generation} (preserve user tree)` });
+        t.candidate = await this.github.create('commits', { tree, parents: [t.originalHead], message: `Stateful Git Sync Manifest repair generation ${manifest.generation} (preserve user tree)` });
         t.phase = 'candidate'; await this.save(t);
       }
       await this.verifyCandidate(t, audit.snapshot);

@@ -1,4 +1,10 @@
-# VaultBridge changelog
+# Stateful Git Sync changelog
+
+## 1.1.16 - Stateful Git Sync display name
+
+- Renamed the public display name from VaultBridge to Stateful Git Sync so the plugin has a unique name for the Obsidian community directory.
+- Updated Settings, Preview, Dashboard, command prefixes, activity labels, future sync commit messages, documentation and release packaging to the new display name.
+- Kept Obsidian plugin ID `local-mirror-sync`, installation folder, command/view IDs, SecretStorage references, deviceId, BASE, Manifest, Recovery and Three-Way Sync behavior unchanged.
 
 ## 1.1.15 - Larger mobile confirmation dialog
 

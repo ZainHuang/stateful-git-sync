@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $manifest = Get-Content -LiteralPath (Join-Path $projectRoot 'manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.id -ne 'local-mirror-sync' -or $manifest.name -ne 'VaultBridge') { throw 'Unexpected plugin identity' }
-$bundleRoot = Join-Path $projectRoot 'dist\vaultbridge'
+if ($manifest.id -ne 'local-mirror-sync' -or $manifest.name -ne 'Stateful Git Sync') { throw 'Unexpected plugin identity' }
+$bundleRoot = Join-Path $projectRoot 'dist\stateful-git-sync'
 $packageRoot = Join-Path $projectRoot ('artifacts\release-package-' + [guid]::NewGuid().ToString())
 $pluginRoot = Join-Path $packageRoot $manifest.id
 New-Item -ItemType Directory -Path $pluginRoot -Force | Out-Null
@@ -14,7 +14,7 @@ foreach ($file in $files) {
     }
     Copy-Item -LiteralPath $source -Destination (Join-Path $pluginRoot $file)
 }
-$archive = Join-Path $bundleRoot ('vaultbridge-' + $manifest.version + '.zip')
+$archive = Join-Path $bundleRoot ('stateful-git-sync-' + $manifest.version + '.zip')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 $archiveStream = [System.IO.File]::Open($archive, [System.IO.FileMode]::Create)

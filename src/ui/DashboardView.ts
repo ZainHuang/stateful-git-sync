@@ -29,7 +29,7 @@ export class DashboardView extends ItemView {
   private signature = '';
   constructor(leaf: WorkspaceLeaf, private readonly plugin: LocalMirrorSyncPlugin, private readonly historyOnly = false) { super(leaf); }
   getViewType(): string { return this.historyOnly ? HISTORY_VIEW : DASHBOARD_VIEW; }
-  getDisplayText(): string { return this.historyOnly ? 'Sync History' : 'VaultBridge Dashboard'; }
+  getDisplayText(): string { return this.historyOnly ? 'Sync History' : 'Stateful Git Sync Dashboard'; }
   getIcon(): string { return this.historyOnly ? 'history' : 'refresh-cw'; }
   async onOpen(): Promise<void> { this.signature = ''; this.render(); }
   async onClose(): Promise<void> { ++this.revision; }

@@ -209,7 +209,7 @@ export class SyncService {
         this.stage('Create tree');
         const treeSha = await github.create('trees', { base_tree: capture.remote.treeSha, tree });
         this.stage('Create commit');
-        t.commit = await github.create('commits', { tree: treeSha, parents: [t.originalHead], message: `VaultBridge generation ${t.manifest.generation} · ${preview.state.deviceId}` });
+        t.commit = await github.create('commits', { tree: treeSha, parents: [t.originalHead], message: `Stateful Git Sync generation ${t.manifest.generation} · ${preview.state.deviceId}` });
         t.publication = { treeSha, events: [{ kind: 'commit-created', at: new Date().toISOString(), commit: t.commit }] };
         this.active();
         await this.transactions.save(t);

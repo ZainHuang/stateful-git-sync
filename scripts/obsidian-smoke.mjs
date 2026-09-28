@@ -93,7 +93,7 @@ try {
   report.screenshots.push('settings.png');
   report.checks.push('Native settings Save uses real Obsidian SecretStorage; data.json has no token; input is masked');
   await page.evaluate(() => { app.setting.close(); document.body.classList.remove('theme-light'); document.body.classList.add('theme-dark'); });
-  await page.getByText('VaultBridge settings saved.', { exact: true }).waitFor({ state: 'hidden', timeout: 8000 });
+  await page.getByText('Stateful Git Sync settings saved.', { exact: true }).waitFor({ state: 'hidden', timeout: 8000 });
 
   const payload = Object.fromEntries(await Promise.all(['ref', 'commit', 'tree'].map(async key => [key, JSON.parse(await readFile(`test-repository/${key}.json`, 'utf8'))])));
   const baseline = await digestVault(vaultPath);

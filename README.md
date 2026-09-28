@@ -1,4 +1,4 @@
-# VaultBridge
+# Stateful Git Sync
 
 **通过 GitHub，在多台设备之间同步 Obsidian 笔记，并明确处理冲突、中断和验证。**
 
@@ -6,19 +6,19 @@ Stateful multi-device sync for Obsidian via GitHub, with three-way sync, conflic
 
 [下载安装包](https://github.com/ZainHuang/vaultbridge/releases/latest) · [报告问题](https://github.com/ZainHuang/vaultbridge/issues) · [升级兼容说明](docs/compatibility.md) · [安全说明](SECURITY.md)
 
-VaultBridge 原名 **Local Mirror Sync**。显示名称已更新，插件 ID 仍为 `local-mirror-sync`，以保留已有设备的 Token、deviceId、BASE 和 Recovery。**升级时只覆盖三个插件文件，不要卸载或重命名原插件目录。**
+Stateful Git Sync 原名 **VaultBridge**，更早名称为 **Local Mirror Sync**。显示名称已更新，插件 ID 仍为 `local-mirror-sync`，以保留已有设备的 Token、deviceId、BASE 和 Recovery。**升级时只覆盖三个插件文件，不要卸载或重命名原插件目录。**
 
 ## What it is · 它是什么
 
-VaultBridge 是 Obsidian 插件，支持桌面和移动端运行。每台设备保留自己的同步历史，通过同一个 GitHub 仓库交换笔记、附件和文件身份信息。不需要在手机安装 Git、Node.js 或运行服务器。
+Stateful Git Sync 是 Obsidian 插件，支持桌面和移动端运行。每台设备保留自己的同步历史，通过同一个 GitHub 仓库交换笔记、附件和文件身份信息。不需要在手机安装 Git、Node.js 或运行服务器。
 
 GitHub 是设备之间的**中央同步媒介**，不仅是单向备份：一台设备发布的修改、重命名和删除，可以经审阅后应用到另一台设备。请为笔记创建单独的**私有仓库**，不要把个人 Vault 上传到这个公开插件源码仓库。
 
-## Why VaultBridge · 为什么不用普通 Git merge
+## Why Stateful Git Sync · 为什么不用普通 Git merge
 
 Git 工作流适合版本控制，但文本 merge 不能单独解决多设备文件同步的所有问题：新手机没有历史时如何判断远端文件、删除是否来自已知旧版本、附件冲突时该保留哪份、上传后应用被关闭如何继续。
 
-VaultBridge 不运行 `git pull` / `git merge`，也不把它们当作同步协议。它比较 **BASE / LOCAL / REMOTE**，再生成可审阅的文件操作。正文和二进制都不自动合并；两端冲突时不会按修改时间猜赢家，也不采用 **last-writer-wins**。
+Stateful Git Sync 不运行 `git pull` / `git merge`，也不把它们当作同步协议。它比较 **BASE / LOCAL / REMOTE**，再生成可审阅的文件操作。正文和二进制都不自动合并；两端冲突时不会按修改时间猜赢家，也不采用 **last-writer-wins**。
 
 ## Core features · 核心功能
 
@@ -34,9 +34,9 @@ VaultBridge 不运行 `git pull` / `git merge`，也不把它们当作同步协�
 
 ```mermaid
 flowchart LR
-    W[Windows · VaultBridge] <--> G[(GitHub · 文件与 Manifest)]
-    I[iPhone / iPad · VaultBridge] <--> G
-    A[Android · VaultBridge] <--> G
+    W[Windows · Stateful Git Sync] <--> G[(GitHub · 文件与 Manifest)]
+    I[iPhone / iPad · Stateful Git Sync] <--> G
+    A[Android · Stateful Git Sync] <--> G
     W --- B1[本机 BASE / LOCAL]
     I --- B2[本机 BASE / LOCAL]
     A --- B3[本机 BASE / LOCAL]
@@ -69,14 +69,14 @@ flowchart LR
 
 ## Installation · 安装与升级
 
-需要 Obsidian **1.6.0 或更新版本**，建议使用当前稳定版。VaultBridge 尚未提交 Obsidian 社区插件目录审核。
+需要 Obsidian **1.6.0 或更新版本**，建议使用当前稳定版。Stateful Git Sync 正在准备提交 Obsidian 社区插件目录审核。
 
 ### Windows / Android：安装 Release
 
-1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `vaultbridge-1.1.15.zip`，不要下载 GitHub 自动生成的 Source code 压缩包。
+1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `stateful-git-sync-1.1.16.zip`，不要下载 GitHub 自动生成的 Source code 压缩包。
 2. 解压后得到 `local-mirror-sync` 文件夹，里面是 `main.js`、`manifest.json`、`styles.css`。
 3. 放入 Vault 的 `.obsidian/plugins/`。Android 文件管理器可能需要开启“显示隐藏文件”。自定义 Obsidian 配置目录时，用它替代 `.obsidian`。
-4. 重启 Obsidian，在 **Settings → Community plugins** 中允许社区插件并启用 **VaultBridge**。
+4. 重启 Obsidian，在 **Settings → Community plugins** 中允许社区插件并启用 **Stateful Git Sync**。
 
 ```text
 YourVault/
@@ -90,9 +90,9 @@ YourVault/
 
 ### iOS / iPadOS：通过 BRAT 安装
 
-iOS 文件应用不便直接管理隐藏插件目录。可以在 Obsidian 社区插件中安装并启用 **BRAT**，在其设置中选择添加 beta 插件，填写 `https://github.com/ZainHuang/vaultbridge`，选择最新 Release 后启用 VaultBridge。Windows、Android 也可使用此方法，具体界面参见 [BRAT 官方指南](https://github.com/TfTHacker/obsidian42-brat)。
+iOS 文件应用不便直接管理隐藏插件目录。可以在 Obsidian 社区插件中安装并启用 **BRAT**，在其设置中选择添加 beta 插件，填写 `https://github.com/ZainHuang/vaultbridge`，选择最新 Release 后启用 Stateful Git Sync。Windows、Android 也可使用此方法，具体界面参见 [BRAT 官方指南](https://github.com/TfTHacker/obsidian42-brat)。
 
-BRAT 负责插件安装更新；笔记仓库 Token 在 **VaultBridge 设置**里配置。公开插件的安装不需要你的笔记仓库 Token。更新时保留原插件 ID，不要先卸载。
+BRAT 负责插件安装更新；笔记仓库 Token 在 **Stateful Git Sync 设置**里配置。公开插件的安装不需要你的笔记仓库 Token。更新时保留原插件 ID，不要先卸载。
 
 ## GitHub setup · 配置 GitHub
 
@@ -108,7 +108,7 @@ BRAT 负责插件安装更新；笔记仓库 Token 在 **VaultBridge 设置**里
 2. 设置名称、合适的到期时间和 Resource owner。
 3. Repository access 选 **Only select repositories**，只授权你的笔记仓库。
 4. Repository permissions 设置 **Contents: Read and write**，保留必需的 Metadata 读取权限。
-5. 生成 Token，填入 VaultBridge 的 **GitHub Token**，点击 **Save settings**。建议每台设备单独创建，便于分别撤销。
+5. 生成 Token，填入 Stateful Git Sync 的 **GitHub Token**，点击 **Save settings**。建议每台设备单独创建，便于分别撤销。
 
 组织仓库可能需要管理员批准。若同步 `.github/workflows/`，还需对应 Workflows 权限；普通笔记可直接忽略该目录。参见 [GitHub Token 指南](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) 与 [权限说明](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)。
 
@@ -128,7 +128,7 @@ Token 优先使用 Obsidian SecretStorage；不可用时设置页会提示保存
 ## First device setup · 初始化第一台设备
 
 1. 备份现有 Vault，安装插件，完成并保存 GitHub 设置。
-2. 运行命令 **VaultBridge: Initialize / Adopt Vault** 或 **Preview Sync**。
+2. 运行命令 **Stateful Git Sync: Initialize / Adopt Vault** 或 **Preview Sync**。
 3. 根据预览模式操作：
 
 | 模式 | 出现条件 | 操作 |
@@ -156,7 +156,7 @@ Token 优先使用 Obsidian SecretStorage；不可用时设置页会提示保存
 
 ## Manual Sync · 手动同步
 
-运行 **VaultBridge: Sync (review first)**，先看推送、拉取、删除、重命名及冲突；列表仅显示变动文档，每页 10 条。再点击 **Sync & Verify**。超过 Delete Safety Threshold 的移除路径会弹出确认窗口，要求准确输入 `DELETE N`；默认阈值 20，重命名源路径也计入。
+运行 **Stateful Git Sync: Sync (review first)**，先看推送、拉取、删除、重命名及冲突；列表仅显示变动文档，每页 10 条。再点击 **Sync & Verify**。超过 Delete Safety Threshold 的移除路径会弹出确认窗口，要求准确输入 `DELETE N`；默认阈值 20，重命名源路径也计入。
 
 建议开始编辑前检查远端，结束后再同步。等待同步结束再关闭应用；预览后内容改变就重新 Preview。
 
@@ -224,7 +224,7 @@ Windows、iOS、Android 使用相同 Web/Obsidian Vault API，无 Node-only 运�
 
 ## Security · 安全与隐私
 
-VaultBridge 直接通过 HTTPS 访问 `api.github.com`，无需中转服务器。GitHub 上的笔记**不经过本插件端到端加密**，有仓库权限的账号可读取；使用私有笔记仓库。
+Stateful Git Sync 直接通过 HTTPS 访问 `api.github.com`，无需中转服务器。GitHub 上的笔记**不经过本插件端到端加密**，有仓库权限的账号可读取；使用私有笔记仓库。
 
 不要分享 Token、`data.json`、完整 Recovery 或未脱敏日志。SecretStorage 可用性取决于 Obsidian，本地回退不是加密保险箱。设备名、deviceId 和设备报告会随相关推送写入笔记仓库。详见 [SECURITY.md](SECURITY.md)。
 
@@ -258,7 +258,7 @@ npm run test:property
 npm run build
 ```
 
-`npm test` 自动生成合成 fixtures。fixtures、profile、日志、截图、Recovery 和构建输出均不提交。bundle 位于 `dist/vaultbridge/`，唯一运行时外部依赖为 `obsidian`。
+`npm test` 自动生成合成 fixtures。fixtures、profile、日志、截图、Recovery 和构建输出均不提交。bundle 位于 `dist/stateful-git-sync/`，唯一运行时外部依赖为 `obsidian`。
 
 Windows 真实应用集成测试使用独立生成的 Vault/profile 和本机 HTTP GitHub 仿真：
 

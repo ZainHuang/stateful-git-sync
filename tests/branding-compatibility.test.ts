@@ -13,10 +13,10 @@ const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const options = { ...target, includeObsidian: false, ignorePatterns: '', deleteSafetyThreshold: 20 };
 
-describe('VaultBridge branding and upgrade compatibility', () => {
-  it('publishes VaultBridge using the original Obsidian installation identity', () => {
-    expect(manifest.name).toBe('VaultBridge');
-    expect(pkg.name).toBe('vaultbridge');
+describe('Stateful Git Sync branding and upgrade compatibility', () => {
+  it('publishes Stateful Git Sync using the original Obsidian installation identity', () => {
+    expect(manifest.name).toBe('Stateful Git Sync');
+    expect(pkg.name).toBe('stateful-git-sync');
     expect(manifest.id).toBe('local-mirror-sync');
     expect(manifest.version).toBe(pkg.version);
     expect(manifest.isDesktopOnly).toBe(false);
