@@ -8,7 +8,7 @@ export class SettingsTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    new Setting(containerEl).setName('Stateful Git Sync').setHeading();
+    new Setting(containerEl).setName('Synchronization').setHeading();
     containerEl.createEl('p', { text: 'V1.1 · Stateful Three-Way Sync. Review Preview or enable safe Auto Sync. Every sync is verified.' });
     new Setting(containerEl).setName('Sync Dashboard').setDesc('Repository health, file counts, devices and local history. Opens cached state without GitHub requests.')
       .addButton(button => button.setButtonText('Open Dashboard').onClick(() => { void this.plugin.openDashboard(); }))

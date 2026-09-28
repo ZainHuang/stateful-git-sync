@@ -29,7 +29,7 @@ describe('Stateful Git Sync branding and upgrade compatibility', () => {
     expect(manifest.minAppVersion).toBe('1.6.0');
     expect(main).not.toContain('this.app.secretStorage');
     expect(main).not.toContain('.revealLeaf(');
-    expect(settings).toContain("new Setting(containerEl).setName('Stateful Git Sync').setHeading()");
+    expect(settings).toContain("new Setting(containerEl).setName('Synchronization').setHeading()");
   });
 
   it('retains existing SecretStorage references and fallback settings without generating a new secret', () => {
