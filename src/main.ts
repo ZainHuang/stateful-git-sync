@@ -4,7 +4,7 @@ import { Modal, Platform, Plugin, requestUrl, setIcon } from 'obsidian';
 import { PreviewError, safeError } from './errors';
 import { SettingsTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS, loadSettings, type Settings } from './settings/settings';
-import { TokenStore } from './settings/TokenStore';
+import { TokenStore, type Secrets } from './settings/TokenStore';
 import { SyncService } from './sync/execution/SyncService';
 import { isLegacyPublished } from './sync/execution/LegacyPublishedRecovery';
 import { PreviewModal } from './ui/PreviewModal';
@@ -42,7 +42,11 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     this.settings = loadSettings(await this.loadData());
     if (!this.settings.deviceName) this.settings.deviceName = Platform.isIosApp ? 'iPhone' : Platform.isAndroidApp ? 'Android' : Platform.isWin ? 'Windows-PC' : Platform.isMacOS ? 'MacBook' : 'Desktop';
     if (!this.settings.deviceType) this.settings.deviceType = Platform.isMobile ? 'mobile' : 'desktop';
-    this.tokens = new TokenStore(this.app.secretStorage);
+    // SecretStorage was added after the declared minimum app version. Older
+    // clients keep using the existing local-token fallback without changing
+    // the plugin's installation identity or sync behavior.
+    const appWithOptionalSecrets = this.app as unknown as { secretStorage?: Secrets };
+    this.tokens = new TokenStore(appWithOptionalSecrets.secretStorage);
     const statePath = `${this.app.vault.configDir}/plugins/local-mirror-sync/${LOCAL_SYNC_STATE_FILENAME}`;
     const adapter = this.app.vault.adapter;
     this.syncState = new LocalStateStore({
@@ -181,7 +185,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
   async openDashboard(history = false): Promise<void> {
     const type = history ? HISTORY_VIEW : DASHBOARD_VIEW;
     const leaf = this.app.workspace.getLeavesOfType(type)[0] ?? this.app.workspace.getLeaf(true);
-    await leaf.setViewState({ type, active: true }); await this.app.workspace.revealLeaf(leaf);
+    await leaf.setViewState({ type, active: true }); this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   openPreview(verifyOnly = false): void {

@@ -1,9 +1,9 @@
 {
   "id": "local-mirror-sync",
   "name": "Stateful Git Sync",
-  "version": "1.1.16",
+  "version": "1.1.17",
   "minAppVersion": "1.6.0",
-  "description": "Stateful multi-device sync for Obsidian via GitHub, with three-way sync, conflict protection, recovery, and verification.",
+  "description": "Stateful multi-device sync via GitHub, with three-way sync, conflict protection, recovery, and verification.",
   "author": "ZainHuang",
   "isDesktopOnly": false,
   "authorUrl": "https://github.com/ZainHuang"

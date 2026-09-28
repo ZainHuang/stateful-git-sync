@@ -1,5 +1,11 @@
 # Stateful Git Sync changelog
 
+## 1.1.17 - Community directory compliance
+
+- Removed the redundant product name from the directory description and changed the Settings title to Obsidian's official `Setting.setHeading()` API.
+- Preserved support for Obsidian 1.6.0 by feature-detecting SecretStorage and using the established local-token fallback on older clients.
+- Replaced the newer `Workspace.revealLeaf()` call with the compatible active-leaf API. Plugin identity, sync protocol, persisted state and user workflows are unchanged.
+
 ## 1.1.16 - Stateful Git Sync display name
 
 - Renamed the public display name from VaultBridge to Stateful Git Sync so the plugin has a unique name for the Obsidian community directory.

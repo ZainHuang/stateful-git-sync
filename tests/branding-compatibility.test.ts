@@ -20,6 +20,16 @@ describe('Stateful Git Sync branding and upgrade compatibility', () => {
     expect(manifest.id).toBe('local-mirror-sync');
     expect(manifest.version).toBe(pkg.version);
     expect(manifest.isDesktopOnly).toBe(false);
+    expect(manifest.description).not.toMatch(/\bObsidian\b/i);
+  });
+
+  it('uses directory-compatible settings and workspace APIs without raising the minimum app version', () => {
+    const main = readFileSync('src/main.ts', 'utf8');
+    const settings = readFileSync('src/settings/SettingsTab.ts', 'utf8');
+    expect(manifest.minAppVersion).toBe('1.6.0');
+    expect(main).not.toContain('this.app.secretStorage');
+    expect(main).not.toContain('.revealLeaf(');
+    expect(settings).toContain("new Setting(containerEl).setName('Stateful Git Sync').setHeading()");
   });
 
   it('retains existing SecretStorage references and fallback settings without generating a new secret', () => {

@@ -2,9 +2,20 @@
 
 **通过 GitHub，在多台设备之间同步 Obsidian 笔记，并明确处理冲突、中断和验证。**
 
-Stateful multi-device sync for Obsidian via GitHub, with three-way sync, conflict protection, recovery, and verification.
+Stateful multi-device sync via GitHub, with three-way sync, conflict protection, recovery, and verification.
 
 [下载安装包](https://github.com/ZainHuang/vaultbridge/releases/latest) · [报告问题](https://github.com/ZainHuang/vaultbridge/issues) · [升级兼容说明](docs/compatibility.md) · [安全说明](SECURITY.md)
+
+## English overview
+
+Stateful Git Sync keeps a vault synchronized through a GitHub repository while protecting file identity and history. It compares a verified BASE with current LOCAL and REMOTE states, previews every Push, Pull, delete, rename and conflict, and requires explicit choices when neither side is automatically safe.
+
+- Auto Sync is off by default and stops for conflicts, initialization, recovery and high-risk plans.
+- Every completed sync verifies the remote commit, local bytes and saved BASE before reporting success.
+- Interrupted work retains recovery records and backup references instead of silently choosing a winner.
+- Desktop and mobile clients are supported; the minimum app version is 1.6.0.
+
+Download the latest release, extract the `local-mirror-sync` folder into the vault's plugin directory, then enable **Stateful Git Sync** under **Settings → Community plugins**. The bilingual guide below covers setup, permissions, synchronization modes and recovery.
 
 Stateful Git Sync 原名 **VaultBridge**，更早名称为 **Local Mirror Sync**。显示名称已更新，插件 ID 仍为 `local-mirror-sync`，以保留已有设备的 Token、deviceId、BASE 和 Recovery。**升级时只覆盖三个插件文件，不要卸载或重命名原插件目录。**
 
@@ -73,7 +84,7 @@ flowchart LR
 
 ### Windows / Android：安装 Release
 
-1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `stateful-git-sync-1.1.16.zip`，不要下载 GitHub 自动生成的 Source code 压缩包。
+1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `stateful-git-sync-1.1.17.zip`，不要下载 GitHub 自动生成的 Source code 压缩包。
 2. 解压后得到 `local-mirror-sync` 文件夹，里面是 `main.js`、`manifest.json`、`styles.css`。
 3. 放入 Vault 的 `.obsidian/plugins/`。Android 文件管理器可能需要开启“显示隐藏文件”。自定义 Obsidian 配置目录时，用它替代 `.obsidian`。
 4. 重启 Obsidian，在 **Settings → Community plugins** 中允许社区插件并启用 **Stateful Git Sync**。

@@ -32,7 +32,7 @@ export async function verifyBrand({ page, remote, preview, execute, close, state
   assert.equal(remote.calls.length, requests);
   await page.evaluate(() => { app.setting.open(); app.setting.openTabById('local-mirror-sync'); });
   const settings = await surface('.lms-device-setting');
-  assert(await settings.getByRole('heading', { name: 'Stateful Git Sync', exact: true }).count());
+  assert(await settings.locator('.setting-item-heading .setting-item-name').filter({ hasText: 'Stateful Git Sync' }).count());
   await screenshot('stateful-git-sync-settings');
   await page.evaluate(() => app.setting.close());
   report.checks.push('Stateful Git Sync display name, command prefix, Preview, Dashboard and Settings verified in production Obsidian');

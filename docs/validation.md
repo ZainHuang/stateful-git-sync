@@ -1,5 +1,13 @@
 # Stateful Git Sync validation
 
+## 1.1.17
+
+- Obsidian Community automated review first failed on three directory-compliance errors: the manifest description named Obsidian, two APIs exceeded the declared minimum app version, and Settings created a raw HTML heading. The new regression assertions failed before the fix and passed afterward.
+- The implementation keeps `minAppVersion` at 1.6.0: SecretStorage is feature-detected with the established local-token fallback, Dashboard activation uses the compatible workspace API, and Settings uses `Setting.setHeading()`. Plugin identity, BASE, Manifest, Recovery and Three-Way Sync behavior are unchanged.
+- `npm run check` passed TypeScript, ESLint, all 717 tests across 35 files and the mobile-safe build. The dedicated property suite passed 100 tests; the public candidate audit scanned 142 files and both bundles with zero findings.
+- Isolated Windows Obsidian 1.13.7 branding validation passed Preview, Dashboard and Settings with zero console errors. Visual inspection confirmed the official Settings heading renders correctly. The full V1 suite passed all 13 lifecycle checks with zero console errors and no `force:true` branch update.
+- The release ZIP contains exactly `main.js`, `manifest.json` and `styles.css` under the compatible `local-mirror-sync` directory. `stateful-git-sync-1.1.17.zip` SHA-256 is `528a25a0fe0da2e3e7bf224b910899425e6632151ef4cd517949d9c4738b974a`.
+
 ## 1.1.16
 
 - Branding compatibility RED first failed because the manifest still exposed VaultBridge. The implementation then changed only display/distribution branding while retaining plugin ID `local-mirror-sync` and all state paths.
