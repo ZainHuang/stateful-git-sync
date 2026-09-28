@@ -1,5 +1,12 @@
 # VaultBridge validation
 
+## 1.1.15
+
+- Mobile confirmation RED reproduced the reported failure by asserting that instructions appear before keyboard focus and by simulating a native host rule that collapses the dialog to 64px.
+- The corrected phone dialog retains a 380px minimum when space permits, keeps warning/phrase/input/actions inside its bounds, and remains contained under visual viewport shrink/pan, native keyboard height, combined signals and safe areas.
+- `npm run check` passed all 716 tests across 35 files, TypeScript, ESLint and the mobile-safe build. The focused keyboard, Preview confirmation and complete V1 Obsidian suites passed with zero Console errors.
+- Exact confirmation matching and all sync protocol semantics are unchanged. Physical iPhone installation remains a separate verification boundary.
+
 ## 1.1.13
 
 - A new isolated Obsidian integration test first failed on the old Dashboard History section. After implementation it passed change-only Preview rows, ten-row pagination, deletion confirmation after Sync click, exact phrase/cancel safety, and the separate History view with zero Console errors.

@@ -11,6 +11,10 @@ export async function verifyMobileKeyboard({ page, remote, report, preview, clos
     window.__keyboardViewport = Object.assign(new EventTarget(), { height: 844, width: 390, offsetTop: 0, scale: 1 });
     window.__originalViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: window.__keyboardViewport });
+    const style = document.createElement('style');
+    style.id = 'lms-native-confirmation-collapse-regression';
+    style.textContent = '.modal-container.lms-viewport-container > .modal.lms-confirm-modal { height: 64px; }';
+    document.head.append(style);
   });
   // Reopen so production listeners bind to the simulated visual viewport.
   await close(); await preview();
@@ -20,6 +24,8 @@ export async function verifyMobileKeyboard({ page, remote, report, preview, clos
   const input = ui.getByRole('textbox', { name: 'Adoption confirmation' });
   const execute = ui.getByRole('button', { name: 'Confirm & Adopt', exact: true });
   assert(await execute.isDisabled());
+  assert.equal(await input.evaluate(el => el === document.activeElement), false,
+    'Mobile confirmation must show its instructions before opening the keyboard');
   await input.evaluate(el => el.focus());
   const setKeyboard = async (height, offsetTop = 0, nativeHeight = 0, viewportEvent = true) => {
     await ui.evaluate(({ height, offsetTop, nativeHeight, viewportEvent }) => {
@@ -33,9 +39,16 @@ export async function verifyMobileKeyboard({ page, remote, report, preview, clos
   const visible = async (bottom, top = 0) => {
     const bounds = await ui.evaluate(() => {
       const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, width: r.width }; };
-      return { input: box('.lms-confirm-input'), footer: box('.lms-confirm-modal .lms-footer'), modal: box('.lms-confirm-modal'), overflow: [...document.querySelectorAll('.lms-modal, .modal-content')].some(el => el.scrollWidth > el.clientWidth + 1) };
+      return { warning: box('.lms-confirm-modal .lms-warning'), label: box('.lms-confirm-modal .lms-search-label'), input: box('.lms-confirm-input'),
+        footer: box('.lms-confirm-modal .lms-footer'), modal: box('.lms-confirm-modal'),
+        overflow: [...document.querySelectorAll('.lms-modal, .modal-content')].some(el => el.scrollWidth > el.clientWidth + 1) };
     });
     report.keyboardBounds ??= []; report.keyboardBounds.push({ top, bottom, ...bounds });
+    assert(bounds.modal.bottom - bounds.modal.top >= Math.min(360, bottom - top), `Confirmation is too small: ${JSON.stringify(bounds)}`);
+    for (const key of ['warning', 'label', 'input', 'footer']) {
+      assert(bounds[key].top >= bounds.modal.top && bounds[key].bottom <= bounds.modal.bottom,
+        `${key} escapes confirmation: ${JSON.stringify(bounds)}`);
+    }
     assert(bounds.input.top >= top && bounds.input.bottom <= bottom, `Confirmation obscured: ${JSON.stringify(bounds)}`);
     assert(bounds.footer.top >= top && bounds.footer.bottom <= bottom, `Actions obscured: ${JSON.stringify(bounds)}`);
     assert(bounds.modal.top >= top && bounds.modal.bottom <= bottom, `Modal exceeds visible viewport: ${JSON.stringify(bounds)}`);
@@ -74,6 +87,7 @@ export async function verifyMobileKeyboard({ page, remote, report, preview, clos
     document.body.style.removeProperty('--safe-area-inset-top');
     document.body.style.removeProperty('--safe-area-inset-bottom');
     document.body.classList.remove('is-mobile', 'is-phone');
+    document.getElementById('lms-native-confirmation-collapse-regression')?.remove();
   });
   await ui.setViewportSize({ width: 1200, height: 900 });
   await preview();

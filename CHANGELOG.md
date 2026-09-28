@@ -1,5 +1,11 @@
 # VaultBridge changelog
 
+## 1.1.15 - Larger mobile confirmation dialog
+
+- Destructive-action confirmations now open as a substantially larger phone dialog instead of collapsing to a title-only strip under native mobile modal styles.
+- On phones, the instructions are shown before the software keyboard opens. After the user taps the input, the warning, exact phrase, field and actions remain inside the keyboard-visible viewport and safe areas.
+- Desktop confirmation remains keyboard-first. Exact `DELETE N`, `USE LOCAL` and `USE REMOTE` matching, deletion thresholds, Preview, BASE, Manifest, Recovery and Three-Way Sync behavior are unchanged.
+
 ## 1.1.14 — Correct plugin author
 
 - Obsidian plugin author is now shown as ZainHuang. Sync behavior and stored data are unchanged.

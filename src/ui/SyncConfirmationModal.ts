@@ -5,6 +5,7 @@ import { keepModalAboveKeyboard } from './MobileModalViewport';
  * the user chooses to execute it. Closing this dialog never starts a sync. */
 export class SyncConfirmationModal extends Modal {
   private releaseViewport?: () => void;
+  private releaseMobileFocusGuard?: () => void;
   constructor(app: App, private readonly phrase: string, private readonly message: string,
     private readonly adoption: boolean, private readonly confirmed: (phrase: string) => void,
     private readonly closed: () => void) { super(app); }
@@ -30,10 +31,25 @@ export class SyncConfirmationModal extends Modal {
       this.close(); this.confirmed(this.phrase);
     };
     this.releaseViewport = keepModalAboveKeyboard(this);
-    input.focus();
+    // Let phone users read the destructive-action instructions before the
+    // software keyboard consumes the visible viewport. Obsidian focuses the
+    // first form field after onOpen, so briefly exclude it from that pass.
+    if (this.containerEl.hasClass('lms-viewport-container')) {
+      input.tabIndex = -1; input.readOnly = true;
+      const win = input.ownerDocument.defaultView;
+      const timer = win?.setTimeout(() => {
+        if (input.ownerDocument.activeElement === input) input.blur();
+        input.readOnly = false; input.removeAttribute('tabindex');
+      });
+      this.releaseMobileFocusGuard = () => {
+        if (timer !== undefined) win?.clearTimeout(timer);
+        input.readOnly = false; input.removeAttribute('tabindex');
+      };
+    } else input.focus();
   }
 
   onClose(): void {
+    this.releaseMobileFocusGuard?.();
     this.releaseViewport?.();
     this.contentEl.empty();
     this.closed();
