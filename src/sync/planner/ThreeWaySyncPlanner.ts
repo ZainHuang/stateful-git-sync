@@ -65,7 +65,7 @@ export class ThreeWaySyncPlanner {
       const baseEntry = base?.files[id];
       const remote = remoteManifest?.files[id];
       const recorded = domain.localFiles[id];
-      const local = identity.matched.get(id) ?? (recorded?.deleted || (!baseEntry && !remote && recorded) ? { ...recorded!, deleted: true } : undefined);
+      const local = identity.matched.get(id) ?? (recorded?.deleted || (!baseEntry && !remote && recorded) ? { ...recorded, deleted: true } : undefined);
       entries.push(identity.uncertainIds.has(id)
         ? { category: 'CONFLICT_IDENTITY_UNCERTAIN', fileId: id, path: baseEntry?.path ?? remote!.path, reason: 'Missing tracked path and unexplained local files; rename identity is uncertain.' }
         : resolveFile({ base: baseEntry, local, remote }));

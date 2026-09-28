@@ -15,9 +15,7 @@ Stateful Git Sync keeps a vault synchronized through a GitHub repository while p
 - Interrupted work retains recovery records and backup references instead of silently choosing a winner.
 - Desktop and mobile clients are supported; the minimum app version is 1.6.0.
 
-Download the latest release, extract the `local-mirror-sync` folder into the vault's plugin directory, then enable **Stateful Git Sync** under **Settings → Community plugins**. The bilingual guide below covers setup, permissions, synchronization modes and recovery.
-
-Stateful Git Sync 原名 **VaultBridge**，更早名称为 **Local Mirror Sync**。显示名称已更新，插件 ID 仍为 `local-mirror-sync`，以保留已有设备的 Token、deviceId、BASE 和 Recovery。**升级时只覆盖三个插件文件，不要卸载或重命名原插件目录。**
+Install **Stateful Git Sync** from **Settings → Community plugins**. For a manual installation, place the three supported release assets in the plugin directory identified by `local-mirror-sync`, then enable the plugin. The bilingual guide below covers setup, permissions, synchronization modes and recovery.
 
 ## What it is · 它是什么
 
@@ -80,13 +78,13 @@ flowchart LR
 
 ## Installation · 安装与升级
 
-需要 Obsidian **1.6.0 或更新版本**，建议使用当前稳定版。Stateful Git Sync 正在准备提交 Obsidian 社区插件目录审核。
+需要 Obsidian **1.6.0 或更新版本**，建议使用当前稳定版。可以直接在 Obsidian 社区插件目录搜索并安装 **Stateful Git Sync**。
 
-### Windows / Android：安装 Release
+### Windows / Android：手动安装 Release
 
-1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `stateful-git-sync-1.1.17.zip`，不要下载 GitHub 自动生成的 Source code 压缩包。
-2. 解压后得到 `local-mirror-sync` 文件夹，里面是 `main.js`、`manifest.json`、`styles.css`。
-3. 放入 Vault 的 `.obsidian/plugins/`。Android 文件管理器可能需要开启“显示隐藏文件”。自定义 Obsidian 配置目录时，用它替代 `.obsidian`。
+1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `main.js`、`manifest.json`、`styles.css` 三个文件；不要下载 GitHub 自动生成的 Source code 压缩包。
+2. 在 Vault 的插件目录中创建技术 ID 文件夹 `local-mirror-sync`，把三个文件放入其中。Android 文件管理器可能需要开启“显示隐藏文件”。自定义 Obsidian 配置目录时，用它替代 `.obsidian`。
+3. 确认目录结构如下。
 4. 重启 Obsidian，在 **Settings → Community plugins** 中允许社区插件并启用 **Stateful Git Sync**。
 
 ```text
@@ -97,7 +95,7 @@ YourVault/
     styles.css
 ```
 
-升级 Local Mirror Sync：停用插件，只覆盖上述三个文件，再启用。**保留 `data.json`、`sync-state.json`、`device-state.json`、`product-state.json`、`.sync-history/` 和 `.local-mirror-sync/`。** 有 Pending Recovery 时，升级后继续 Review Recovery。
+升级 Stateful Git Sync：停用插件，只覆盖上述三个文件，再启用。**保留 `data.json`、`sync-state.json`、`device-state.json`、`product-state.json`、`.sync-history/` 和 `.local-mirror-sync/`。** 有 Pending Recovery 时，升级后继续 Review Recovery。
 
 ### iOS / iPadOS：通过 BRAT 安装
 

@@ -47,7 +47,7 @@ describe('Real sync activity projection', () => {
       const settings = { ...DEFAULT_SETTINGS, autoSync: true };
       const auto = new AutoSyncController({ settings: () => settings, busy: () => a.service.running,
         check: async () => { const preview = await a.service.preview(options, 'test'); return { preview, block: a.service.autoBlock(preview, settings) }; },
-        execute: p => a.service.execute(p, 'test'), status: s => a.product.auto(s) });
+        execute: p => a.service.execute(p, 'test'), status: s => a.product.auto(s) }, undefined, globalThis as unknown as Window);
       await auto.run(); auto.stop();
     }
     const result = a.product.activitySnapshot();
@@ -87,7 +87,7 @@ describe('Real sync activity projection', () => {
   it('publishes a real debounce deadline, resets it on changes, and clears it on disable', async () => {
     const a = await setup(); vi.useFakeTimers(); const settings = { ...DEFAULT_SETTINGS, autoSync: true };
     const check = vi.fn();
-    const auto = new AutoSyncController({ settings: () => settings, busy: () => false, check, execute: vi.fn(), status: s => a.product.auto(s) });
+    const auto = new AutoSyncController({ settings: () => settings, busy: () => false, check, execute: vi.fn(), status: s => a.product.auto(s) }, undefined, globalThis as unknown as Window);
     auto.changed(); expect(a.product.snapshot().auto.scheduledAt).toBe(Date.now() + 30000);
     await vi.advanceTimersByTimeAsync(5000); auto.changed(); expect(a.product.snapshot().auto.scheduledAt).toBe(Date.now() + 30000);
     settings.autoSync = false; auto.configure(); expect(a.product.snapshot().auto.scheduledAt).toBeUndefined();
@@ -97,7 +97,7 @@ describe('Real sync activity projection', () => {
     const a = await setup(); await a.sync(); vi.useFakeTimers();
     const settings = { ...DEFAULT_SETTINGS, autoSync: true };
     const check = vi.fn(async () => ({ preview: await a.service.preview(options, 'test') }));
-    const auto = new AutoSyncController({ settings: () => settings, busy: () => false, check, execute: vi.fn(), status: s => a.product.auto(s) });
+    const auto = new AutoSyncController({ settings: () => settings, busy: () => false, check, execute: vi.fn(), status: s => a.product.auto(s) }, undefined, globalThis as unknown as Window);
     auto.changed(); const deadline = a.product.snapshot().auto.scheduledAt; auto.reviewed();
     expect(a.product.snapshot().auto.scheduledAt).toBe(deadline);
     await vi.advanceTimersByTimeAsync(30000); expect(check).toHaveBeenCalledOnce(); auto.stop();

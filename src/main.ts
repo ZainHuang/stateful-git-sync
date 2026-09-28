@@ -199,7 +199,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     this.previewModal = new PreviewModal(this.app, options, async (progress, signal) => {
       await this.metadataPending;
       await this.productPending;
-      if (this.stateError) throw this.stateError;
+      if (this.stateError) throw this.stateError instanceof Error ? this.stateError : new Error(safeError(this.stateError));
       if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Reopen Preview to use the new target and ignore rules.');
       let result;
       try { result = await this.sync.preview(options, this.tokens.read(settings), progress, signal); }
@@ -211,7 +211,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     }, verifyOnly ? undefined : {
       execute: async (result, progress, signal, confirmation) => {
         await this.metadataPending;
-        if (this.stateError) throw this.stateError;
+        if (this.stateError) throw this.stateError instanceof Error ? this.stateError : new Error(safeError(this.stateError));
         if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Refresh Preview.');
         try { await this.sync.execute(result, this.tokens.read(settings), progress, signal, confirmation); this.auto.reviewed(); }
         catch (error) { try { this.syncState.current(); } catch (stateError) { this.stateError = stateError; } await this.recordFailure(error); throw error; }

@@ -18,7 +18,7 @@ describe('RemoteTreeReader', () => {
     expect(calls).toHaveLength(3);
     expect(calls.every(call => call.method === 'GET' && call.url.startsWith('https://api.github.com/'))).toBe(true);
     expect(calls[0]?.headers.Authorization).toBe('Bearer test-token');
-    expect(calls[0]?.headers['User-Agent']).toBe('Local-Mirror-Sync/0.1.5');
+    expect(calls[0]?.headers['User-Agent']).toBe('Stateful-Git-Sync/1.1.18');
   });
   it('replaces a truncated response with complete subtree traversal', async () => {
     const calls: string[] = [];

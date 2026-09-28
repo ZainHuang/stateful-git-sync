@@ -1,15 +1,22 @@
 # Stateful Git Sync changelog
 
+## 1.1.18 - Initial community release hardening
+
+- Cleared the current Obsidian automated-review findings without changing BASE, Manifest, Three-Way Sync, conflict, Recovery or verification behavior.
+- Added searchable settings definitions while retaining the established settings UI on Obsidian 1.6.0 and later.
+- Release automation now publishes only `main.js`, `manifest.json` and `styles.css`, with GitHub build-provenance attestations for the exact files.
+- Public installation and release copy now presents Stateful Git Sync as a first-release product and omits development-stage naming history.
+
 ## 1.1.17 - Community directory compliance
 
 - Removed the redundant product name from the directory description and changed the Settings section title to the official `Setting.setHeading()` API without repeating the plugin name.
 - Preserved support for Obsidian 1.6.0 by feature-detecting SecretStorage and using the established local-token fallback on older clients.
 - Replaced the newer `Workspace.revealLeaf()` call with the compatible active-leaf API. Plugin identity, sync protocol, persisted state and user workflows are unchanged.
 
-## 1.1.16 - Stateful Git Sync display name
+## 1.1.16 - Public metadata finalization
 
-- Renamed the public display name from VaultBridge to Stateful Git Sync so the plugin has a unique name for the Obsidian community directory.
-- Updated Settings, Preview, Dashboard, command prefixes, activity labels, future sync commit messages, documentation and release packaging to the new display name.
+- Finalized the unique Stateful Git Sync display name for the Obsidian community directory.
+- Updated Settings, Preview, Dashboard, command prefixes, activity labels, future sync commit messages, documentation and release packaging to use the public name consistently.
 - Kept Obsidian plugin ID `local-mirror-sync`, installation folder, command/view IDs, SecretStorage references, deviceId, BASE, Manifest, Recovery and Three-Way Sync behavior unchanged.
 
 ## 1.1.15 - Larger mobile confirmation dialog
@@ -44,13 +51,13 @@
 - Mobile confirmation dialogs adapt to the keyboard-visible viewport and native keyboard height, scroll the focused field/actions into view, and respect safe areas.
 - Three-way resolution, existing stable identities and tombstones retain their existing semantics.
 
-## 1.1.9 — First public VaultBridge release
+## 1.1.9 — Initial public build
 
-- Renamed the display name, settings, Preview, Dashboard, command prefix, activity labels, commit messages and distribution metadata to VaultBridge.
+- Established the initial display name, settings, Preview, Dashboard, command prefix, activity labels, commit messages and distribution metadata.
 - Kept Obsidian plugin ID `local-mirror-sync`, existing command/view IDs, SecretStorage references, state paths, Manifest and Recovery formats. No ID or data migration.
 - Published user installation/setup/recovery documentation, MIT license, reproducible build instructions, public-file audit and CI.
 - Includes Stateful BASE / LOCAL / REMOTE Three-Way Sync, stable file identity, tombstone deletion and rename propagation, conflict protection, initialization/adoption, verified GitHub publication and Recovery.
 - Includes safe event-driven Auto Sync (default OFF), cached Dashboard, local Sync History, device reports and activity status.
-- Retains the existing stable 1.1.9 Dashboard refresh fix and all prior sync/recovery behavior. The rename does not change synchronization semantics or increment the version.
+- Retains the existing stable 1.1.9 Dashboard refresh fix and all prior sync/recovery behavior. Public metadata does not change synchronization semantics.
 
-Release assets: `main.js`, `manifest.json`, `styles.css`, `vaultbridge-1.1.9.zip`, `SHA256SUMS.txt`.
+Release assets included the three Obsidian runtime files and development packaging artifacts.

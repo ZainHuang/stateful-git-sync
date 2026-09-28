@@ -1,15 +1,34 @@
-import { Notice, PluginSettingTab, Setting, type App } from 'obsidian';
+import { Notice, PluginSettingTab, Setting, type App, type SettingDefinitionItem } from 'obsidian';
 import { safeError } from '../errors';
 import type LocalMirrorSyncPlugin from '../main';
 
 export class SettingsTab extends PluginSettingTab {
   constructor(app: App, private readonly plugin: LocalMirrorSyncPlugin) { super(app, plugin); }
 
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [{
+      name: 'Stateful Git Sync settings',
+      aliases: [
+        'Sync dashboard', 'Device status', 'Device initialization', 'Device name', 'Device type',
+        'GitHub owner', 'Repository', 'Branch', 'GitHub token', 'Sync mode', 'Delete safety threshold',
+        'Ignore patterns', 'Include configuration folder', 'Auto sync', 'Auto sync debounce',
+        'Auto sync delete threshold', 'Auto sync changed files threshold', 'Auto verify', 'Recovery storage',
+      ],
+      render: setting => {
+        setting.settingEl.addClass('lms-settings-host');
+        this.renderSettings(setting.settingEl);
+      },
+    }];
+  }
+
   display(): void {
-    const { containerEl } = this;
+    this.renderSettings(this.containerEl);
+  }
+
+  private renderSettings(containerEl: HTMLElement): void {
     containerEl.empty();
     new Setting(containerEl).setName('Synchronization').setHeading();
-    containerEl.createEl('p', { text: 'V1.1 · Stateful Three-Way Sync. Review Preview or enable safe Auto Sync. Every sync is verified.' });
+    containerEl.createEl('p', { text: 'Stateful Three-Way Sync. Review Preview or enable safe Auto Sync. Every sync is verified.' });
     new Setting(containerEl).setName('Sync Dashboard').setDesc('Repository health, file counts, devices and local history. Opens cached state without GitHub requests.')
       .addButton(button => button.setButtonText('Open Dashboard').onClick(() => { void this.plugin.openDashboard(); }))
       .addButton(button => button.setButtonText('Sync History').onClick(() => { void this.plugin.openDashboard(true); }));
@@ -52,7 +71,7 @@ export class SettingsTab extends PluginSettingTab {
         text.inputEl.rows = 6;
         text.setPlaceholder('*.mp3\n*.m4a\n*.wav').setValue(draft.ignorePatterns).onChange(value => { draft.ignorePatterns = value; });
       });
-    new Setting(containerEl).setName('Include .obsidian').setDesc('Off by default. This plugin, its token/state, workspace files and cache are always excluded.')
+    new Setting(containerEl).setName(`Include ${this.app.vault.configDir}`).setDesc('Off by default. This plugin, its token/state, workspace files and cache are always excluded.')
       .addToggle(toggle => toggle.setValue(draft.includeObsidian).onChange(value => { draft.includeObsidian = value; }));
     new Setting(containerEl).setName('Auto Sync').setDesc('OFF by default. Vault changes trigger a debounced Preview; only small, conflict-free plans execute. Initialization, adoption, recovery, remote Manifest changes and high-risk plans require manual review.')
       .addToggle(toggle => toggle.setValue(draft.autoSync).onChange(value => { draft.autoSync = value; }));
@@ -87,7 +106,10 @@ export class SettingsTab extends PluginSettingTab {
         }
         await this.plugin.saveSettings(draft, token);
         token = undefined;
-        if (connected()) { this.display(); new Notice('Stateful Git Sync settings saved.'); }
+        if (connected()) {
+          this.renderSettings(containerEl);
+          new Notice('Stateful Git Sync settings saved.');
+        }
       } catch (error) { if (connected()) feedback.setText(safeError(error)); }
       finally { if (connected()) button.setDisabled(false); }
     }));

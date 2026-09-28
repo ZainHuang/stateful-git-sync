@@ -88,7 +88,8 @@ export class VaultScanner {
         if (file) { files.push(file); if (files.length % 25 === 0 || files.length === total) fileProgress?.(files.length, total); }
         if (files.length % 25 === 0) {
           progress(`Hashing local files: ${files.length}`);
-          await new Promise(resolve => setTimeout(resolve, 0));
+          if (typeof window !== 'undefined') await new Promise(resolve => window.setTimeout(resolve, 0));
+          else await Promise.resolve();
         }
       }
       const afterInventory = await this.inventory(ignore, signal);

@@ -13,13 +13,14 @@ interface AutoHost {
 
 /** Event-driven, single-flight scheduling. No polling or automatic recovery/resolution. */
 export class AutoSyncController {
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: number;
   private stopped = false;
   private running = false;
   private pending = false;
   private manual = false;
   private state: AutoStatus = { result: 'Waiting for changes' };
-  constructor(private readonly host: AutoHost, initial?: AutoStatus) {
+  constructor(private readonly host: AutoHost, initial?: AutoStatus,
+    private readonly timerWindow: Pick<Window, 'setTimeout' | 'clearTimeout'> = window) {
     if (initial) this.state = { ...initial };
     this.manual = initial?.result === 'Manual confirmation required';
   }
@@ -29,16 +30,16 @@ export class AutoSyncController {
     this.schedule();
   }
   private schedule(): void {
-    clearTimeout(this.timer);
+    this.timerWindow.clearTimeout(this.timer);
     this.state.scheduledAt = Date.now() + this.host.settings().autoSyncDebounceSeconds * 1000;
     this.reportSchedule();
-    this.timer = setTimeout(() => { void this.run(); }, this.host.settings().autoSyncDebounceSeconds * 1000);
+    this.timer = this.timerWindow.setTimeout(() => { void this.run(); }, this.host.settings().autoSyncDebounceSeconds * 1000);
   }
   private reportSchedule(): void {
-    void Promise.resolve(this.host.status({ ...this.state })).catch(() => { this.manual = true; clearTimeout(this.timer); });
+    void Promise.resolve(this.host.status({ ...this.state })).catch(() => { this.manual = true; this.timerWindow.clearTimeout(this.timer); });
   }
   configure(): void {
-    clearTimeout(this.timer);
+    this.timerWindow.clearTimeout(this.timer);
     this.state.scheduledAt = undefined; this.reportSchedule();
     if (this.host.settings().autoSync && this.pending && !this.manual) this.schedule();
   }
@@ -46,9 +47,9 @@ export class AutoSyncController {
     this.manual = false; this.state.result = 'Waiting for changes'; this.state.reason = undefined;
     void Promise.resolve(this.host.status({ ...this.state })).catch(() => { this.manual = true; });
   }
-  stop(): void { this.stopped = true; this.pending = false; clearTimeout(this.timer); this.state.scheduledAt = undefined; this.reportSchedule(); }
+  stop(): void { this.stopped = true; this.pending = false; this.timerWindow.clearTimeout(this.timer); this.state.scheduledAt = undefined; this.reportSchedule(); }
   async run(): Promise<void> {
-    clearTimeout(this.timer); this.state.scheduledAt = undefined;
+    this.timerWindow.clearTimeout(this.timer); this.state.scheduledAt = undefined;
     if (this.stopped || !this.host.settings().autoSync || this.manual) return;
     if (this.running || this.host.busy()) { this.pending = true; this.schedule(); return; }
     this.running = true; this.pending = false;

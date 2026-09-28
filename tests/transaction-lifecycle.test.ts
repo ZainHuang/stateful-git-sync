@@ -48,7 +48,7 @@ describe('One confirmation completes the transaction lifecycle', () => {
       const settings = { ...DEFAULT_SETTINGS, autoSync: true };
       const auto = new AutoSyncController({ settings: () => settings, busy: () => a.service.running,
         check: async () => { const preview = await a.service.preview(options, 'test'); return { preview, block: a.service.autoBlock(preview, settings) }; },
-        execute: p => a.service.execute(p, 'test'), status: s => a.product.auto(s) });
+        execute: p => a.service.execute(p, 'test'), status: s => a.product.auto(s) }, undefined, globalThis as unknown as Window);
       await auto.run(); auto.stop(); expect(a.product.snapshot().auto.result).toBe('Verified');
     }
     for (const [first, second] of [['publish', 'published'], ['published', 'remote-verify'], ['remote-verify', 'local-verify'], ['local-verify', 'verified'], ['verified', 'base-readback'], ['base-readback', 'complete'], ['complete', 'clear']]) {

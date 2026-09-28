@@ -50,7 +50,7 @@ export class DashboardView extends ItemView {
   }
   private renderSnapshot(revision: number, transaction: SyncTransaction | null = null, error?: string): void {
     if (revision !== this.revision || !this.contentEl.isConnected) return;
-    const el = document.createElement('div');
+    const el = createDiv();
     el.createEl('h1', { text: this.getDisplayText() });
     if (this.historyOnly) {
       const history = this.plugin.product.cachedHistory();
@@ -95,8 +95,8 @@ export class DashboardView extends ItemView {
     for (const device of d.devices) {
       const row = devices.createDiv({ cls: 'lms-device-row' });
       row.createEl('strong', { text: device.deviceName });
-      row.createEl('span', { text: `${device.deviceType} · Generation ${device.lastGeneration ?? 'Not synced'}` });
-      row.createEl('span', { text: `Last sync: ${time(device.lastSyncAt)}` });
+      row.createSpan({ text: `${device.deviceType} · Generation ${device.lastGeneration ?? 'Not synced'}` });
+      row.createSpan({ text: `Last sync: ${time(device.lastSyncAt)}` });
     }
     this.commitView(el);
   }

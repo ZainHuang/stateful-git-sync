@@ -1,5 +1,14 @@
 # Stateful Git Sync validation
 
+## 1.1.18
+
+- Reproduced the Community review locally with the official Obsidian ESLint configuration: 33 source findings failed before implementation and zero remained afterward. The separate release review accounted for four more findings.
+- Release automation publishes only `main.js`, `manifest.json` and `styles.css` and generates GitHub build-provenance attestations for those exact files.
+- `npm run check` passed TypeScript, both ESLint configurations, all 717 tests across 35 files and the mobile-safe build. The dedicated property suite passed 100 tests; the public candidate audit scanned 142 files and both bundles with zero findings.
+- Isolated Windows Obsidian 1.13.7 settings/branding validation passed three checks with zero console errors. Visual inspection caught and corrected declarative-setting host overflow, then confirmed normal vertical layout.
+- The full V1 application lifecycle passed all 13 checks with zero console errors, including initialization, Push/Pull, conflict choice, deletion confirmation, new-device Bootstrap, interrupted-publication Recovery, read-only Verify, mobile execution and both explicit adoption authorities. Branch updates recorded no `force:true`.
+- Public documentation and release copy use Stateful Git Sync as the product name and do not publish development-stage naming history. Technical plugin ID and state paths remain unchanged for data safety.
+
 ## 1.1.17
 
 - Obsidian Community automated review first failed on three directory-compliance errors: the manifest description named Obsidian, two APIs exceeded the declared minimum app version, and Settings created a raw HTML heading. A branch preview then caught the additional rule that settings headings must not repeat the plugin name. The new regression assertions failed before the fixes and passed afterward.
@@ -10,7 +19,7 @@
 
 ## 1.1.16
 
-- Branding compatibility RED first failed because the manifest still exposed VaultBridge. The implementation then changed only display/distribution branding while retaining plugin ID `local-mirror-sync` and all state paths.
+- Public-metadata compatibility RED first failed because the manifest did not yet use the final product name. The implementation changed only display/distribution metadata while retaining plugin ID `local-mirror-sync` and all state paths.
 - `npm run check` passed TypeScript, ESLint, all 716 tests across 35 files and the mobile-safe build. The public candidate audit scanned 142 files and both bundles with zero findings.
 - Isolated Windows Obsidian branding validation passed Preview, Dashboard and Settings with zero console errors. Visual inspection found no clipping or overflow from the longer name; reload preserved exact settings bytes, deviceId and BASE, and opening Dashboard made no GitHub request.
 - The mobile keyboard suite passed every viewport/keyboard/safe-area bound with no overflow. The full V1 suite passed all 13 lifecycle checks with zero console errors, including 390px Push/Pull, conflict, delete, Bootstrap, Recovery and both Legacy Adoption authorities; branch updates recorded no `force:true`.
@@ -83,7 +92,7 @@ Validated on 2026-09-20 with Node.js 24.16.0, npm 11.13.0 and Windows Obsidian 1
 | Public-file and bundle scan | No credential/private-path findings in the publication set |
 | Install package | Exactly three runtime files under the compatible plugin directory; ZIP entries and SHA-256 checked |
 
-The new regression suite was run before the rename: the VaultBridge display-name assertion failed while three compatibility cases passed. After the minimal rename, all four passed. It covers existing SecretStorage/fallback credentials, BASE/device identity, Manifest and interrupted Recovery across reload in default and custom config directories.
+The regression suite was run before the public metadata update: the display-name assertion failed while three compatibility cases passed. After the minimal update, all four passed. It covers existing SecretStorage/fallback credentials, BASE/device identity, Manifest and interrupted Recovery across reload in default and custom config directories.
 
 ## Real application integration
 

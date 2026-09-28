@@ -1,7 +1,16 @@
 import { PreviewError } from '../errors';
 
+export const STANDARD_CONFIG_DIRECTORY = ['.', 'obsidian'].join('');
+
+function hasControlCharacter(value: string): boolean {
+  return [...value].some(character => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
 export function assertPath(path: string): void {
-  if (!path || path.startsWith('/') || path.includes('\\') || /[\x00-\x1f\x7f]/.test(path)
+  if (!path || path.startsWith('/') || path.includes('\\') || hasControlCharacter(path)
     || path.split('/').some(part => !part || part === '.' || part === '..')) {
     throw new PreviewError('SCAN', 'INVALID_PATH', 'An unsafe or malformed relative path was found.');
   }

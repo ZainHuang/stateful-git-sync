@@ -33,7 +33,7 @@ export class ActivityPanel extends Modal {
     const el = this.details; el.empty();
     const current = el.createDiv({ cls: 'lms-activity-current', attr: { role: 'status', 'aria-live': 'polite' } });
     current.createEl('strong', { text: a.stage ?? (a.running ? 'Starting sync activity…' : 'No activity in this session.') });
-    if (a.total !== undefined && a.processed !== undefined) current.createEl('span', { text: `${a.processed} / ${a.total} files`, cls: 'lms-muted' });
+    if (a.total !== undefined && a.processed !== undefined) current.createSpan({ text: `${a.processed} / ${a.total} files`, cls: 'lms-muted' });
     const fields = el.createEl('dl', { cls: 'lms-dashboard-fields' });
     fields.createEl('dt', { text: 'Generation' }); fields.createEl('dd', { text: String(a.generation ?? cache.currentDevice.lastGeneration ?? 'No BASE') });
     if (a.transactionId) { fields.createEl('dt', { text: 'Transaction' }); fields.createEl('dd', { text: a.transactionId }); }
@@ -44,7 +44,7 @@ export class ActivityPanel extends Modal {
         const last = i === a.steps.length - 1;
         const state = last ? a.error ? 'Stopped' : a.running ? 'In progress' : 'Finished' : 'Done';
         const row = steps.createEl('li', { attr: { 'data-state': state } });
-        row.createEl('span', { text: step.stage }); row.createEl('span', { text: state, cls: 'lms-muted' });
+        row.createSpan({ text: step.stage }); row.createSpan({ text: state, cls: 'lms-muted' });
       });
     }
     el.createEl('p', { text: 'Only observed stages are shown. File counts appear when known; no estimated percentage.', cls: 'lms-muted' });

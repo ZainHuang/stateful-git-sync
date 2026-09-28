@@ -1,4 +1,5 @@
 .modal.lms-modal { width: min(860px, 95vw); max-height: 90vh; }
+.setting-item.lms-settings-host { display: block; padding: 0; border: 0; }
 .lms-modal .modal-content { overflow-x: hidden; }
 /* Fit only our mobile dialogs to the visible area above the software keyboard. */
 .modal-container.lms-viewport-container {
@@ -113,7 +114,10 @@
 .lms-activity-attention { color: var(--text-warning); }
 .lms-activity-entry:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
 @keyframes lms-sync-rotate { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .lms-activity-running svg { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .lms-activity-entry.lms-activity-running .lms-activity-icon svg,
+  .lms-activity-ribbon.lms-activity-running svg { animation: none; }
+}
 .modal.lms-activity-dialog { width: min(480px, 94vw); }
 .lms-activity-panel { overflow-wrap: anywhere; font-size: var(--font-ui-small); }
 .lms-activity-health { font-weight: var(--font-semibold); margin: 0 0 6px; }

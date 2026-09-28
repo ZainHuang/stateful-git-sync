@@ -85,7 +85,7 @@ export class GitHubWriter {
   private async write(method: 'POST' | 'PATCH', resource: string, body: Record<string, unknown>): Promise<unknown> {
     if (!this.token) throw failed('TOKEN_REQUIRED');
     const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10',
-      'User-Agent': 'Local-Mirror-Sync/1.0.0', 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` };
+      'User-Agent': 'Stateful-Git-Sync/1.1.18', 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` };
     try {
       const response = await this.transport({ url: `https://api.github.com/repos/${encodeURIComponent(this.target.owner)}/${encodeURIComponent(this.target.repository)}/git/${resource}`,
         method, headers, body: JSON.stringify(body), throw: false });

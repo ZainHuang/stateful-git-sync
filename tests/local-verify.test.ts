@@ -100,7 +100,7 @@ describe('Local Verify domain and diagnostics', () => {
     const pending = await a.service.transactions.active(); const calls = a.remote.calls.length;
     const execute = vi.fn(); const status = vi.fn();
     const auto = new AutoSyncController({ settings: () => ({ ...DEFAULT_SETTINGS, autoSync: true }), busy: () => false,
-      check: async () => ({ preview: await a.service.preview(options, 'test') }), execute, status });
+      check: async () => ({ preview: await a.service.preview(options, 'test') }), execute, status }, undefined, globalThis as unknown as Window);
     await auto.run(); auto.stop(); expect(execute).not.toHaveBeenCalled(); expect(a.remote.calls).toHaveLength(calls);
     expect(await a.service.transactions.active()).toEqual(pending); expect(status.mock.calls.at(-1)?.[0].reason).toContain('RECOVERY_REQUIRED');
   });

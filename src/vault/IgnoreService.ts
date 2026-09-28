@@ -1,5 +1,5 @@
 import ignore, { type Ignore } from 'ignore';
-import { assertPath, portableKey } from './paths';
+import { assertPath, portableKey, STANDARD_CONFIG_DIRECTORY } from './paths';
 
 export interface IgnoreOptions {
   includeObsidian: boolean;
@@ -14,7 +14,7 @@ export class IgnoreService {
 
   constructor(private readonly options: IgnoreOptions) {
     assertPath(options.configDir);
-    this.configDirs = [...new Set(['.obsidian', portableKey(options.configDir)])];
+    this.configDirs = [...new Set([STANDARD_CONFIG_DIRECTORY, portableKey(options.configDir)])];
     // Git-compatible semantics, including negation, anchoring and parent directories.
     // Audio matching is case-insensitive on every device; user settings run last.
     this.matcher = ignore({ ignorecase: true }).add(options.gitignore).add(options.patterns);
@@ -29,7 +29,7 @@ export class IgnoreService {
       if (under(`${dir}/cache`) || key === `${dir}/workspace.json` || key === `${dir}/workspace-mobile.json`) {
         return 'Protected Obsidian cache/workspace';
       }
-      if (!this.options.includeObsidian && under(dir)) return 'Include .obsidian is off';
+      if (!this.options.includeObsidian && under(dir)) return 'Include configuration folder is off';
     }
     return undefined;
   }

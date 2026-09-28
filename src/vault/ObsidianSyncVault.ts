@@ -92,7 +92,7 @@ export function obsidianSyncVault(vault: Vault): SyncVault {
         await parents(path);
         if (await adapter.exists(path)) throw changed();
         // Vault.createBinary rejects an occupied destination on both desktop/mobile.
-        await vault.createBinary(path, data.slice().buffer as ArrayBuffer);
+        await vault.createBinary(path, data.slice().buffer);
         if (await hash(path) !== desired) throw changed();
       }
     },

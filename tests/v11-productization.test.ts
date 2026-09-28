@@ -26,7 +26,7 @@ async function setup(remote = new GitFixture(), files: Record<string, string> = 
     check: async () => { const p = await preview(); return { preview: p, block: service.autoBlock(p, settings) }; },
     execute: p => service.execute(p, 'test'),
     status: s => { statuses.push(s.result); },
-  });
+  }, undefined, globalThis as unknown as Window);
   return { remote, vault, state, product, storage, service, preview, sync, auto, settings, statuses };
 }
 afterEach(() => vi.useRealTimers());
@@ -90,7 +90,7 @@ describe('V1.1 safe automatic sync', () => {
   it('remote changed after preview cannot be auto executed', async () => {
     const a = await setup(); await a.sync(); a.vault.files.set('A.md', bytes('new')); const p = await a.preview();
     a.remote.external({ 'external.md': 'keep' }); const head = a.remote.head;
-    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => ({ preview: p }), execute: p => a.service.execute(p, 'test'), status: s => a.statuses.push(s.result) });
+    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => ({ preview: p }), execute: p => a.service.execute(p, 'test'), status: s => a.statuses.push(s.result) }, undefined, globalThis as unknown as Window);
     await c.run(); expect(a.remote.head).toBe(head); expect(a.statuses.at(-1)).toBe('Manual confirmation required');
   });
   it('verify failure preserves recovery, creates no success history, and blocks the next run', async () => {
@@ -113,12 +113,12 @@ describe('V1.1 safe automatic sync', () => {
   });
   it('restores manual confirmation latch across plugin restart', async () => {
     const a = await setup(); let checks = 0;
-    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => { checks++; return { preview: await a.preview() }; }, execute: p => a.service.execute(p, 'test'), status: () => {} }, { result: 'Manual confirmation required', reason: 'Delete threshold' });
+    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => { checks++; return { preview: await a.preview() }; }, execute: p => a.service.execute(p, 'test'), status: () => {} }, { result: 'Manual confirmation required', reason: 'Delete threshold' }, globalThis as unknown as Window);
     await c.run(); expect(checks).toBe(0); c.stop();
   });
   it('stops before execution if Auto Sync is disabled during Preview', async () => {
     const a = await setup(); await a.sync(); a.vault.files.set('A.md', bytes('edited')); const head = a.remote.head;
-    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => { const p = await a.preview(); a.settings.autoSync = false; return { preview: p }; }, execute: p => a.service.execute(p, 'test'), status: () => {} });
+    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => { const p = await a.preview(); a.settings.autoSync = false; return { preview: p }; }, execute: p => a.service.execute(p, 'test'), status: () => {} }, undefined, globalThis as unknown as Window);
     await c.run(); expect(a.remote.head).toBe(head);
   });
   it('pending recovery blocks before any GitHub request', async () => {
@@ -128,7 +128,7 @@ describe('V1.1 safe automatic sync', () => {
   it('serializes checks and coalesces changes arriving while busy', async () => {
     const a = await setup(); await a.sync(); let release!: () => void; let checks = 0;
     const wait = new Promise<void>(resolve => { release = resolve; });
-    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => { checks++; await wait; return { preview: await a.preview() }; }, execute: p => a.service.execute(p, 'test'), status: () => {} });
+    const c = new AutoSyncController({ settings: () => a.settings, busy: () => false, check: async () => { checks++; await wait; return { preview: await a.preview() }; }, execute: p => a.service.execute(p, 'test'), status: () => {} }, undefined, globalThis as unknown as Window);
     vi.useFakeTimers(); const first = c.run(); await Promise.resolve(); await c.run(); c.changed(); expect(checks).toBe(1);
     release(); await first; await vi.advanceTimersByTimeAsync(30000); expect(checks).toBe(2); c.stop();
   });

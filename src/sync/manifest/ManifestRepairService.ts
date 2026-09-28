@@ -105,16 +105,16 @@ export class ManifestRepairService {
       await this.verifyCandidate(t, audit.snapshot);
       const beforePublish = await this.github.head();
       if (beforePublish === t.originalHead) {
-        try { await this.github.publish(t.candidate!, t.originalHead); }
+        try { await this.github.publish(t.candidate, t.originalHead); }
         catch (error) { if (await this.github.head() !== t.candidate) throw error; }
       } else if (beforePublish !== t.candidate) throw fail('REMOTE_HEAD_CHANGED', 'Remote changed before publication. Retain repair evidence.');
       await this.verifyCandidate(t, audit.snapshot);
-      const verified = await auditRemoteManifest(this.github.reader, t.candidate!, this.ignore);
+      const verified = await auditRemoteManifest(this.github.reader, t.candidate, this.ignore);
       if (verified.diagnostics.length || !verified.historyValid || await this.github.head() !== t.candidate) {
         throw fail('REPAIR_VERIFY_FAILED', 'Current remote state did not pass full Manifest/tree/history verification. BASE remains unchanged.');
       }
       t.phase = 'verified'; await this.save(t);
-      return { head: t.candidate!, backupRef: t.backupRef, generation: t.manifest.generation };
+      return { head: t.candidate, backupRef: t.backupRef, generation: t.manifest.generation };
     } finally { this.busy = false; }
   }
 }

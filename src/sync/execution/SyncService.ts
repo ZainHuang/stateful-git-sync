@@ -7,6 +7,7 @@ import type { GitTransport } from '../../github/types';
 import { gitBlobSha } from '../../vault/HashService';
 import { IgnoreService } from '../../vault/IgnoreService';
 import { VaultScanner, type Progress } from '../../vault/VaultScanner';
+import { STANDARD_CONFIG_DIRECTORY } from '../../vault/paths';
 import { MANIFEST_PATH } from '../manifest/ManifestSchema';
 import type { SyncManifest } from '../manifest/ManifestSchema';
 import { parseManifest } from '../manifest/ManifestValidator';
@@ -55,7 +56,7 @@ export class SyncService {
       const revision = this.observer?.revision ?? 0;
       if (await this.transactions.active()) throw recoveryError();
       const state = parseLocalState(this.state.current());
-      if (state.baseManifest && (!state.target || !sameTarget(state.target as PreviewOptions, options))) throw fail('TARGET_MISMATCH', 'This device BASE belongs to another repository or branch. Use a separate Vault.');
+      if (state.baseManifest && (!state.target || !sameTarget(state.target, options))) throw fail('TARGET_MISMATCH', 'This device BASE belongs to another repository or branch. Use a separate Vault.');
       const capture = await new PreviewSnapshotReader(this.vault, this.transport, this.configDir).read(options, token, progress, signal, stage);
       const manifest = await new RemoteManifestReader(capture.client).read(capture.remote, signal);
       await capture.verify();
@@ -79,7 +80,7 @@ export class SyncService {
       || !Number.isSafeInteger(settings.autoSyncChangeThreshold) || settings.autoSyncChangeThreshold < 1) return 'Invalid automatic safety thresholds.';
     if (trusted.deletions > settings.autoSyncDeleteThreshold || trusted.requiresDeleteConfirmation) return 'Delete threshold requires manual confirmation.';
     if (trusted.plan.entries.filter(e => /^(PUSH|PULL)_/.test(e.category)).length > settings.autoSyncChangeThreshold) return 'Changed file threshold requires manual confirmation.';
-    if (trusted.plan.entries.some(e => /^(PUSH|PULL)_/.test(e.category) && [e.path, e.oldPath].some(p => p && (p === '.gitignore' || p.startsWith(`${this.configDir}/`) || p.startsWith('.obsidian/'))))) return 'Configuration changes require manual confirmation.';
+    if (trusted.plan.entries.some(e => /^(PUSH|PULL)_/.test(e.category) && [e.path, e.oldPath].some(p => p && (p === '.gitignore' || p.startsWith(`${this.configDir}/`) || p.startsWith(`${STANDARD_CONFIG_DIRECTORY}/`))))) return 'Configuration changes require manual confirmation.';
     return undefined;
   }
   resolve(preview: SyncPreview, key: string, resolution: Resolution): SyncPreview {
@@ -128,7 +129,7 @@ export class SyncService {
     const canExecute = e.mode !== 'BLOCKED' && !e.plan.hasConflicts && (e.mode !== 'ADOPT' || !!e.adoptionChoice);
     const deletions = canExecute ? Object.keys(e.before).filter(p => !e.after[p]).length + session.capture.remote.entries.filter(f => f.type === 'blob' && !session.capture.ignore.reason(f.path)
       && !Object.values(e.manifest.files).some(m => !m.deleted && m.path === f.path)).length : 0;
-    const result: SyncPreview = { state: JSON.parse(session.stateKey), plan: structuredClone(e.plan), mode: e.mode, adoptionChoice: e.adoptionChoice,
+    const result: SyncPreview = { state: parseLocalState(JSON.parse(session.stateKey)), plan: structuredClone(e.plan), mode: e.mode, adoptionChoice: e.adoptionChoice,
       canExecute, deletions,
       requiresDeleteConfirmation: e.mode !== 'ADOPT' && deletions > session.options.deleteSafetyThreshold, scopeKey: e.scopeKey };
     this.sessions.set(result, session); return result;
@@ -366,7 +367,7 @@ export class SyncService {
       if (!eligible(path)) throw recoveryError();
       if (t.before[path] === t.after[path]) continue;
       const recovery = `${this.transactions.directory(t.id)}/quarantine/${gitBlobSha(new TextEncoder().encode(path))}`;
-      await this.vault.apply(path, t.after[path] ? await this.transactions.blob(t.id, t.after[path]!) : null, t.before[path] ?? null, recovery);
+      await this.vault.apply(path, t.after[path] ? await this.transactions.blob(t.id, t.after[path]) : null, t.before[path] ?? null, recovery);
     }
     progress('Removing verified old empty folders');
     await cleanupEmptyFolders(this.vault, this.transactions, t, ignore);

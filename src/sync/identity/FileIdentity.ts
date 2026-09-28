@@ -37,7 +37,7 @@ export function identifyLocal(files: LocalFile[], base: SyncManifest | null, rem
     const entry = base?.files[id] ?? remote?.files[id];
     if (entry && !entry.deleted) claim(id, entry.path);
   }
-  const missing = ids.filter(id => base?.files[id] && !base.files[id]!.deleted && !matched.has(id));
+  const missing = ids.filter(id => base?.files[id] && !base.files[id].deleted && !matched.has(id));
   for (const id of missing) {
     if (localFiles[id]?.deleted) continue;
     const entry = base!.files[id]!;

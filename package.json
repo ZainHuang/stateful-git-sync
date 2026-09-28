@@ -1,12 +1,13 @@
 {
   "name": "stateful-git-sync",
-  "version": "1.1.17",
+  "version": "1.1.18",
   "private": true,
   "description": "Stateful multi-device sync via GitHub, with three-way sync, conflict protection, recovery, and verification.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests --max-warnings 0",
+    "lint": "eslint src tests --max-warnings 0 && npm run lint:obsidian",
+    "lint:obsidian": "eslint src --config eslint.obsidian.config.mjs --max-warnings 0",
     "test": "vitest run --maxWorkers=4",
     "test:property": "vitest run tests/stateful-property.test.ts",
     "build": "node esbuild.config.mjs",
@@ -38,9 +39,11 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@eslint/json": "0.14.0",
     "@types/node": "26.5.1",
     "esbuild": "0.28.2",
     "eslint": "10.10.0",
+    "eslint-plugin-obsidianmd": "0.4.2",
     "obsidian": "1.13.1",
     "playwright": "1.63.0",
     "typescript": "6.0.3",

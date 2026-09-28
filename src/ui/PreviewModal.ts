@@ -95,7 +95,9 @@ export class PreviewModal extends Modal {
       this.contentEl.createEl('p', { text: safeError(error), cls: 'lms-wrap' });
       this.contentEl.createEl('p', { text: 'No partial plan was generated. Local files and GitHub were not changed.', cls: 'lms-muted' });
       if (error instanceof PreviewError && error.code === 'REMOTE_MANIFEST_INVALID') this.reviewGuidance();
-      const open = this.recover ?? this.actions?.recover;
+      const open = this.recover
+        ? (action?: RecoveryAction) => this.recover?.(action)
+        : this.actions ? (action?: RecoveryAction) => this.actions?.recover(action) : undefined;
       if (error instanceof PreviewError && error.code === 'RECOVERY_REQUIRED' && open) recoveryActions(this.contentEl, open);
       else {
         const retry = this.contentEl.createEl('button', { text: 'Retry Preview' });

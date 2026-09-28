@@ -1,6 +1,6 @@
-# Stateful Git Sync upgrade compatibility
+# Stateful Git Sync technical compatibility
 
-Stateful Git Sync is the display and distribution name introduced in **1.1.16**. It replaces VaultBridge, which previously replaced Local Mirror Sync. These display-name changes do not migrate device data or change the synchronization protocol.
+Stateful Git Sync uses a stable technical plugin ID so installations, device state and recovery records remain compatible across releases. Public product copy uses only the Stateful Git Sync name; the technical ID is not a second display name.
 
 ## Why the plugin ID stays `local-mirror-sync`
 
@@ -27,7 +27,7 @@ Protected-path rules still exclude the plugin, tokens, state, local history and 
 
 Disable the plugin, replace only `main.js`, `manifest.json` and `styles.css` in the **existing** folder, then enable it. Do not uninstall, rename the folder, copy another device's metadata or delete pending Recovery. Existing command shortcuts and saved Dashboard views keep their IDs. The name shown in Settings and the command palette becomes Stateful Git Sync.
 
-No migration function runs. No Token, deviceId, BASE, Manifest or Recovery record is rewritten as part of branding. Internal historical class names are retained to keep the patch small.
+No migration function runs. No Token, deviceId, BASE, Manifest or Recovery record is rewritten by display metadata changes. Internal implementation identifiers do not appear as product names in the UI.
 
 ## Regression coverage
 
