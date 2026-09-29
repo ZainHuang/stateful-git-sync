@@ -37,4 +37,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME"
           main.js manifest.json styles.css
           --title "Stateful Git Sync $GITHUB_REF_NAME"
-          --notes "Initial community release of Stateful Git Sync. This release resolves automated review findings while preserving BASE, Manifest, Three-Way Sync, Recovery, and verification behavior."
+          --notes "Adds Chinese and English navigation for the Community and GitHub descriptions. Sync protocol, stored data, permissions, and runtime behavior are unchanged."

@@ -1,8 +1,8 @@
 {
   "name": "stateful-git-sync",
-  "version": "1.1.18",
+  "version": "1.1.19",
   "private": true,
-  "description": "Stateful multi-device sync via GitHub, with three-way sync, conflict protection, recovery, and verification.",
+  "description": "通过 GitHub 实现安全的多设备三向同步、冲突保护、恢复与验证。 Stateful multi-device sync via GitHub with conflict protection, recovery, and verification.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

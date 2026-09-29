@@ -1,5 +1,11 @@
 # Stateful Git Sync changelog
 
+## 1.1.19 - Bilingual public description
+
+- Added direct Chinese and English navigation with equivalent summaries to the Community and GitHub README.
+- Updated the plugin manifest and GitHub repository description with concise bilingual copy.
+- Sync protocol, stored data, permissions and runtime behavior are unchanged.
+
 ## 1.1.18 - Initial community release hardening
 
 - Cleared the current Obsidian automated-review findings without changing BASE, Manifest, Three-Way Sync, conflict, Recovery or verification behavior.

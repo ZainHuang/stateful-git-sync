@@ -1,21 +1,32 @@
 # Stateful Git Sync
 
-**通过 GitHub，在多台设备之间同步 Obsidian 笔记，并明确处理冲突、中断和验证。**
+[中文说明](#中文说明) · [English](#english)
 
-Stateful multi-device sync via GitHub, with three-way sync, conflict protection, recovery, and verification.
+## 中文说明
 
-[下载安装包](https://github.com/ZainHuang/vaultbridge/releases/latest) · [报告问题](https://github.com/ZainHuang/vaultbridge/issues) · [升级兼容说明](docs/compatibility.md) · [安全说明](SECURITY.md)
+Stateful Git Sync 通过 GitHub 在多台设备之间同步 Obsidian 笔记，并明确处理冲突、中断和验证。它使用经过验证的 BASE 对比当前 LOCAL 与 REMOTE，预览每一次推送、拉取、删除、重命名和冲突；无法安全自动判断时，必须由用户明确选择。
 
-## English overview
+- 自动同步默认关闭，遇到冲突、初始化、恢复或高风险计划时会停止。
+- 每次同步完成前，都会验证远端提交、本地文件内容和保存的 BASE。
+- 同步中断时保留恢复记录和备份引用，不会静默选择任意一端覆盖。
+- 支持桌面端与移动端，最低 Obsidian 版本为 1.6.0。
+
+在 **设置 → 第三方插件** 中安装并启用 **Stateful Git Sync**。手动安装时，只需把 Release 中的 `main.js`、`manifest.json`、`styles.css` 放入插件目录 `local-mirror-sync`。
+
+[下载安装包](https://github.com/ZainHuang/vaultbridge/releases/latest) · [报告问题](https://github.com/ZainHuang/vaultbridge/issues) · [升级兼容说明](docs/compatibility.md) · [安全说明](SECURITY.md) · [切换到 English](#english)
+
+## English
 
 Stateful Git Sync keeps a vault synchronized through a GitHub repository while protecting file identity and history. It compares a verified BASE with current LOCAL and REMOTE states, previews every Push, Pull, delete, rename and conflict, and requires explicit choices when neither side is automatically safe.
 
 - Auto Sync is off by default and stops for conflicts, initialization, recovery and high-risk plans.
 - Every completed sync verifies the remote commit, local bytes and saved BASE before reporting success.
 - Interrupted work retains recovery records and backup references instead of silently choosing a winner.
-- Desktop and mobile clients are supported; the minimum app version is 1.6.0.
+- Desktop and mobile clients are supported; the minimum Obsidian version is 1.6.0.
 
-Install **Stateful Git Sync** from **Settings → Community plugins**. For a manual installation, place the three supported release assets in the plugin directory identified by `local-mirror-sync`, then enable the plugin. The bilingual guide below covers setup, permissions, synchronization modes and recovery.
+Install and enable **Stateful Git Sync** from **Settings → Community plugins**. For a manual installation, place `main.js`, `manifest.json`, and `styles.css` from the Release in the `local-mirror-sync` plugin directory.
+
+[Download](https://github.com/ZainHuang/vaultbridge/releases/latest) · [Report an issue](https://github.com/ZainHuang/vaultbridge/issues) · [Compatibility](docs/compatibility.md) · [Security](SECURITY.md) · [切换到中文](#中文说明)
 
 ## What it is · 它是什么
 
