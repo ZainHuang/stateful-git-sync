@@ -1,5 +1,12 @@
 # Stateful Git Sync changelog
 
+## 1.1.20 - English default and repository rename
+
+- Rename the GitHub repository to `ZainHuang/stateful-git-sync` and update installation, issue and package links.
+- Make the complete English guide the default `README.md`; preserve the Chinese guide in `README.zh-CN.md`.
+- Lead both guides with the stateful multi-device consistency model and its differences from workflows centered on Git pull/push and text merge.
+- Use an English description in the release manifest and package metadata. Plugin ID, stored state, permissions and sync behavior remain unchanged.
+
 ## 1.1.19 - Bilingual public description
 
 - Added direct Chinese and English navigation with equivalent summaries to the Community and GitHub README.

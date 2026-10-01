@@ -1,102 +1,70 @@
 # Stateful Git Sync
 
-[中文说明](#中文说明) · [English](#english)
+English · [简体中文](README.zh-CN.md)
 
-## 中文说明
+**Stateful synchronization across devices, with GitHub as the shared transport.**
 
-Stateful Git Sync 通过 GitHub 在多台设备之间同步 Obsidian 笔记，并明确处理冲突、中断和验证。它使用经过验证的 BASE 对比当前 LOCAL 与 REMOTE，预览每一次推送、拉取、删除、重命名和冲突；无法安全自动判断时，必须由用户明确选择。
+Stateful Git Sync synchronizes Obsidian notes and attachments by tracking what each device last verified, what changed locally, and what changed remotely. Its goal is to bring the files in the shared sync scope to the same reviewed state across devices, including edits, renames and deletions.
 
-- 自动同步默认关闭，遇到冲突、初始化、恢复或高风险计划时会停止。
-- 每次同步完成前，都会验证远端提交、本地文件内容和保存的 BASE。
-- 同步中断时保留恢复记录和备份引用，不会静默选择任意一端覆盖。
-- 支持桌面端与移动端，最低 Obsidian 版本为 1.6.0。
+## What makes it different
 
-在 **设置 → 第三方插件** 中安装并启用 **Stateful Git Sync**。手动安装时，只需把 Release 中的 `main.js`、`manifest.json`、`styles.css` 放入插件目录 `local-mirror-sync`。
+A workflow built around `git pull`, `git push` and text merge handles repository history. Multi-device vault synchronization also needs to know whether a missing file is an intentional deletion, whether a renamed file is still the same file, and whether an interrupted operation actually finished.
 
-[下载安装包](https://github.com/ZainHuang/vaultbridge/releases/latest) · [报告问题](https://github.com/ZainHuang/vaultbridge/issues) · [升级兼容说明](docs/compatibility.md) · [安全说明](SECURITY.md) · [切换到 English](#english)
+Stateful Git Sync makes these questions part of the synchronization protocol:
 
-## English
+| Concern | How Stateful Git Sync handles it |
+| --- | --- |
+| What changed on each device? | Compare a device's last verified **BASE** with current **LOCAL** and **REMOTE**, rather than compare only the two current copies. |
+| Deletions from an offline device | Retain deletion records (**tombstones**) and stable file identities so an unchanged old copy can receive the deletion instead of re-uploading the note. A deletion concurrent with an edit requires review. |
+| Renames and attachments | Track logical file identity separately from its path. Propagate renames when identity is established; uncertain identity or path collisions stop the plan. The same review model applies to text and binary files. |
+| Conflicting edits | Require an explicit **Use LOCAL / Use REMOTE** choice for supported conflicts. No automatic text merge or last-writer-wins rule. Keep both edits in separate copies if you need to merge them manually. |
+| A new, empty device | Initialize from the remote Manifest and establish its own BASE. An empty device without sync history is not evidence that the remote files should be deleted. |
+| Interrupted synchronization | Keep transaction journals and recovery copies, then resume and verify the transaction. A successful upload alone is not a completed sync. |
+| Completion | Publish files and their Manifest together, verify the remote snapshot and relevant local bytes, then save and read back the verified BASE before recording success. |
 
-Stateful Git Sync keeps a vault synchronized through a GitHub repository while protecting file identity and history. It compares a verified BASE with current LOCAL and REMOTE states, previews every Push, Pull, delete, rename and conflict, and requires explicit choices when neither side is automatically safe.
+For example, if a laptop deletes an unchanged note while a phone is offline, the phone can later apply the recorded deletion. If the phone edited that note while offline, the deletion and edit become a conflict to review. A text merge alone does not express that decision.
 
-- Auto Sync is off by default and stops for conflicts, initialization, recovery and high-risk plans.
-- Every completed sync verifies the remote commit, local bytes and saved BASE before reporting success.
-- Interrupted work retains recovery records and backup references instead of silently choosing a winner.
-- Desktop and mobile clients are supported; the minimum Obsidian version is 1.6.0.
+**Multi-device consistency is reached through successful syncs against the same repository and scope.** Devices keep independent verified baselines; they are not all updated at once. Auto Sync is off by default and does not poll GitHub, so run a manual Preview when switching devices to fetch remote changes. This is file synchronization, not real-time collaborative editing.
 
-Install and enable **Stateful Git Sync** from **Settings → Community plugins**. For a manual installation, place `main.js`, `manifest.json`, and `styles.css` from the Release in the `local-mirror-sync` plugin directory.
+[Install](#installation) · [Latest release](https://github.com/ZainHuang/stateful-git-sync/releases/latest) · [Report an issue](https://github.com/ZainHuang/stateful-git-sync/issues) · [Compatibility](docs/compatibility.md) · [Security](SECURITY.md)
 
-[Download](https://github.com/ZainHuang/vaultbridge/releases/latest) · [Report an issue](https://github.com/ZainHuang/vaultbridge/issues) · [Compatibility](docs/compatibility.md) · [Security](SECURITY.md) · [切换到中文](#中文说明)
+## How synchronization works
 
-## What it is · 它是什么
-
-Stateful Git Sync 是 Obsidian 插件，支持桌面和移动端运行。每台设备保留自己的同步历史，通过同一个 GitHub 仓库交换笔记、附件和文件身份信息。不需要在手机安装 Git、Node.js 或运行服务器。
-
-GitHub 是设备之间的**中央同步媒介**，不仅是单向备份：一台设备发布的修改、重命名和删除，可以经审阅后应用到另一台设备。请为笔记创建单独的**私有仓库**，不要把个人 Vault 上传到这个公开插件源码仓库。
-
-## Why Stateful Git Sync · 为什么不用普通 Git merge
-
-Git 工作流适合版本控制，但文本 merge 不能单独解决多设备文件同步的所有问题：新手机没有历史时如何判断远端文件、删除是否来自已知旧版本、附件冲突时该保留哪份、上传后应用被关闭如何继续。
-
-Stateful Git Sync 不运行 `git pull` / `git merge`，也不把它们当作同步协议。它比较 **BASE / LOCAL / REMOTE**，再生成可审阅的文件操作。正文和二进制都不自动合并；两端冲突时不会按修改时间猜赢家，也不采用 **last-writer-wins**。
-
-## Core features · 核心功能
-
-- Stateful Three-Way Sync：推送、拉取、新增、修改、删除和重命名。
-- 稳定文件身份，支持有身份依据的 Rename / Rename+Update。
-- Tombstone 删除记录，防止旧设备把已删除文件重新上传。
-- 首台设备初始化、新设备下载、已有 Vault 接入和旧仓库接管。
-- 显式冲突审阅、默认关闭的 Safe Auto Sync、每次同步后的 Verify。
-- 可恢复事务、Dashboard、本机 Sync History 和设备信息。
-- Windows、iOS、Android 使用同一个插件 bundle。
-
-## How synchronization works · 同步如何工作
+The plugin runs on desktop and mobile without installing Git, Node.js or a server on your phone. Each device exchanges notes, attachments and file identity information through the same GitHub repository.
 
 ```mermaid
 flowchart LR
-    W[Windows · Stateful Git Sync] <--> G[(GitHub · 文件与 Manifest)]
-    I[iPhone / iPad · Stateful Git Sync] <--> G
-    A[Android · Stateful Git Sync] <--> G
-    W --- B1[本机 BASE / LOCAL]
-    I --- B2[本机 BASE / LOCAL]
-    A --- B3[本机 BASE / LOCAL]
+    W[Windows] <--> G[(GitHub: files and Manifest)]
+    I[iPhone / iPad] <--> G
+    A[Android] <--> G
+    W --- B1[Device BASE / LOCAL]
+    I --- B2[Device BASE / LOCAL]
+    A --- B3[Device BASE / LOCAL]
 ```
 
-| 名称 | 含义 |
+| State | Meaning |
 | --- | --- |
-| **BASE** | 这台设备上次通过同步验证的共同版本；各设备独立保存 |
-| **LOCAL** | 当前设备上的文件实际内容 |
-| **REMOTE** | GitHub 目标分支上的文件及已验证的 Manifest |
+| **BASE** | This device's last verified common snapshot, stored independently on each device. |
+| **LOCAL** | The files currently present on this device. |
+| **REMOTE** | The files and verified Manifest on the target GitHub branch. |
 
-例如：手机的 LOCAL 没变，而 REMOTE 相对 BASE 更新了，计划会显示拉取；电脑的 LOCAL 更新而 REMOTE 没变，则显示推送。双方把同一文件改成不同内容时，要求处理冲突。
+When only LOCAL changed relative to BASE, the plan proposes a push. When only REMOTE changed, it proposes a pull. Different changes to the same file require conflict review. Deletions use BASE, file identity and tombstone evidence; a file missing from one side is not automatically a deletion.
 
-删除不是“某一边没有文件就删掉另一边”。插件结合 **BASE、稳定 fileId 和 Tombstone** 判断删除来源。没有 BASE 的新设备，不会因为本地为空就推断应当清空 GitHub。
+The normal workflow is **Preview → review operations and conflicts → Sync & Verify → save and read back BASE**. When publication is needed, files and Manifest are written in one commit; branch updates use `force:false`. Stale previews must be regenerated.
 
-日常流程：**Preview → 审阅操作与冲突 → Sync & Verify → 保存并读回 BASE**。需要发布时，文件与 Manifest 放在同一个 GitHub commit 中，分支更新使用 `force:false`。
+GitHub is the shared synchronization medium, not just a one-way backup. Create a separate **private repository for your notes**; this public repository contains the plugin source code.
 
-手机端点击文件可打开独立大弹窗，查看两端内容并选择 **Use LOCAL / Use REMOTE**。也可以使用 **Use LOCAL / REMOTE for all conflicts** 一次选择当前预览中的全部冲突（含被筛选隐藏的冲突）；非冲突项继续按原计划同步。LOCAL 指当前设备，REMOTE 指 GitHub。这些按钮只更新预览，仍需点击 **Sync & Verify** 才执行。
+## Installation
 
-身份不确定的文件也支持明确选边：保留无身份的本地文件会分配新 ID，不推断重命名；选择某端也包含该端的文件缺失状态，因此可能产生删除。预览会列出操作并保留删除确认、事务备份和 Verify。若所选结果仍存在重复路径或无法写入的路径，会显示具体诊断；Manifest 等仓库级错误仍须先修复。
+Requires **Obsidian 1.6.0 or newer**. Search for **Stateful Git Sync** in **Settings → Community plugins**, then install and enable it. You can also open the [community listing](https://community.obsidian.md/plugins/local-mirror-sync).
 
-## Safety model · 安全边界
+The display name is Stateful Git Sync; the installation ID remains `local-mirror-sync` for upgrade compatibility.
 
-- 冲突不静默覆盖；需要逐文件选择，无法确认身份或路径时保持阻断。
-- 执行前重查本地内容、远端 HEAD 和同步范围；预览过期需要重新预览。
-- 本地破坏性操作保留恢复副本；旧仓库接管还先建立并核验 GitHub 备份分支。
-- **Verify 成功后才推进 BASE**；失败或中断保留恢复记录，不伪造成功。
-- 已发布且没有本地写入的事务，Recovery 可核验已发布快照并建立该快照的 BASE，同时保留后续新编辑，交给下一次 Preview；不会覆盖新编辑来制造“一致”。
-- 同步不是实时协同编辑，没有“绝不会丢数据”的保证。保留独立备份；不要让其他双向同步插件、Git 自动提交工具或云盘同时写同一 Vault。
+### Manual installation
 
-## Installation · 安装与升级
-
-需要 Obsidian **1.6.0 或更新版本**，建议使用当前稳定版。可以直接在 Obsidian 社区插件目录搜索并安装 **Stateful Git Sync**。
-
-### Windows / Android：手动安装 Release
-
-1. 从 [最新 Release](https://github.com/ZainHuang/vaultbridge/releases/latest) 下载 `main.js`、`manifest.json`、`styles.css` 三个文件；不要下载 GitHub 自动生成的 Source code 压缩包。
-2. 在 Vault 的插件目录中创建技术 ID 文件夹 `local-mirror-sync`，把三个文件放入其中。Android 文件管理器可能需要开启“显示隐藏文件”。自定义 Obsidian 配置目录时，用它替代 `.obsidian`。
-3. 确认目录结构如下。
-4. 重启 Obsidian，在 **Settings → Community plugins** 中允许社区插件并启用 **Stateful Git Sync**。
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/ZainHuang/stateful-git-sync/releases/latest). The automatically generated Source code archives are not plugin installation bundles.
+2. Create `.obsidian/plugins/local-mirror-sync/` inside your vault and put the three files there. If you use a custom configuration directory, use it instead of `.obsidian`. Android file managers may need hidden files enabled.
+3. Restart Obsidian and enable **Stateful Git Sync** in **Settings → Community plugins**.
 
 ```text
 YourVault/
@@ -106,119 +74,118 @@ YourVault/
     styles.css
 ```
 
-升级 Stateful Git Sync：停用插件，只覆盖上述三个文件，再启用。**保留 `data.json`、`sync-state.json`、`device-state.json`、`product-state.json`、`.sync-history/` 和 `.local-mirror-sync/`。** 有 Pending Recovery 时，升级后继续 Review Recovery。
+To upgrade manually, disable the plugin, replace only those three files, then enable it again. **Preserve `data.json`, `sync-state.json`, `device-state.json`, `product-state.json`, `.sync-history/` and `.local-mirror-sync/`.** If Recovery is pending, continue with Review Recovery after upgrading.
 
-### iOS / iPadOS：通过 BRAT 安装
+### Installation with BRAT
 
-iOS 文件应用不便直接管理隐藏插件目录。可以在 Obsidian 社区插件中安装并启用 **BRAT**，在其设置中选择添加 beta 插件，填写 `https://github.com/ZainHuang/vaultbridge`，选择最新 Release 后启用 Stateful Git Sync。Windows、Android 也可使用此方法，具体界面参见 [BRAT 官方指南](https://github.com/TfTHacker/obsidian42-brat)。
+On iOS/iPadOS, where hidden plugin directories are harder to manage, you can install **BRAT** from Community plugins and add `https://github.com/ZainHuang/stateful-git-sync` as a beta plugin. Choose the latest release and enable Stateful Git Sync. BRAT also works on Windows and Android; see the [official BRAT guide](https://github.com/TfTHacker/obsidian42-brat).
 
-BRAT 负责插件安装更新；笔记仓库 Token 在 **Stateful Git Sync 设置**里配置。公开插件的安装不需要你的笔记仓库 Token。更新时保留原插件 ID，不要先卸载。
+BRAT handles installation and updates. Configure your notes repository token in **Stateful Git Sync settings**. Installing this public plugin does not require that token. Keep the existing installation ID when upgrading.
 
-## GitHub setup · 配置 GitHub
+## GitHub setup
 
-### 创建笔记仓库
+### Create a notes repository
 
-在自己的 GitHub 账号下创建单独的 **Private** 仓库，例如 `my-vault`，分支用 `main`。勾选创建 README，确保至少有一次提交。插件不创建仓库，也不会把不存在的分支或访问错误当作空仓库。
+Create a separate **private** repository, for example `my-vault`, with an existing branch such as `main`. Include a README when creating it to ensure that the branch has a commit. The plugin does not create repositories or interpret missing branches and access errors as empty repositories.
 
-初始 README 会使仓库进入下文的 **Legacy Adoption** 流程，这是正常情况。你将在审阅时明确决定以现有本地笔记还是 GitHub 内容为准。
+That initial README puts the repository into **Legacy Adoption**, described below. You will explicitly choose whether your existing local notes or the GitHub contents are authoritative for this one-time setup.
 
-### 创建 fine-grained Personal Access Token
+### Create a fine-grained personal access token
 
-1. 打开 GitHub **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**。
-2. 设置名称、合适的到期时间和 Resource owner。
-3. Repository access 选 **Only select repositories**，只授权你的笔记仓库。
-4. Repository permissions 设置 **Contents: Read and write**，保留必需的 Metadata 读取权限。
-5. 生成 Token，填入 Stateful Git Sync 的 **GitHub Token**，点击 **Save settings**。建议每台设备单独创建，便于分别撤销。
+1. In GitHub, open **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. Choose a name, expiration and resource owner.
+3. Under Repository access, choose **Only select repositories** and select your notes repository.
+4. Grant **Contents: Read and write** and the required Metadata read access.
+5. Enter the token in the plugin's **GitHub Token** field and select **Save settings**. Separate tokens per device make revocation easier.
 
-组织仓库可能需要管理员批准。若同步 `.github/workflows/`，还需对应 Workflows 权限；普通笔记可直接忽略该目录。参见 [GitHub Token 指南](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) 与 [权限说明](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)。
+Organization repositories may require approval. Synchronizing `.github/workflows/` also requires the corresponding Workflows permission; ordinary note vaults can ignore that directory. See GitHub's [token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) and [permissions reference](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
 
-| 插件设置 | 示例 / 建议 |
+| Setting | Example / recommendation |
 | --- | --- |
-| GitHub Owner | 你的 GitHub 用户名或组织名 |
-| Repository | `my-vault`，只填仓库名 |
-| Branch | `main`，必须已存在 |
-| GitHub Token | 上一步生成的 Token |
-| Device name / type | 如 `Home-PC` / Desktop、`Phone` / Mobile；不要填敏感信息 |
-| Include .obsidian | 默认关闭，首次使用建议保持关闭 |
-| Ignore Patterns | 每行一条；各设备保持一致 |
-| Auto Sync | 初始化时保持关闭 |
+| GitHub Owner | Your GitHub username or organization. |
+| Repository | `my-vault`; enter only the repository name. |
+| Branch | `main`; it must already exist. |
+| GitHub Token | The token created above. |
+| Device name / type | For example `Home-PC` / Desktop or `Phone` / Mobile; avoid sensitive information. |
+| Include .obsidian | Off by default; keep it off for initial setup. |
+| Ignore Patterns | One pattern per line; keep the scope consistent across devices. |
+| Auto Sync | Keep off during initialization. |
 
-Token 优先使用 Obsidian SecretStorage；不可用时设置页会提示保存到本机插件 `data.json`。不要复制该文件到其他设备。Token 输入框留着不动会保留凭据，主动清空后保存会清除它。
+Credentials use Obsidian SecretStorage when available. Otherwise, settings warn that the token is stored in the local plugin's `data.json`; do not copy it to another device. Leaving the token field untouched preserves the credential; explicitly clearing it and saving removes it.
 
-## First device setup · 初始化第一台设备
+## First device setup
 
-1. 备份现有 Vault，安装插件，完成并保存 GitHub 设置。
-2. 运行命令 **Stateful Git Sync: Initialize / Adopt Vault** 或 **Preview Sync**。
-3. 根据预览模式操作：
+1. Back up your vault, install the plugin, and save the GitHub settings.
+2. Run **Stateful Git Sync: Initialize / Adopt Vault** or **Preview Sync**.
+3. Follow the mode shown in the preview:
 
-| 模式 | 出现条件 | 操作 |
+| Mode | When it appears | Action |
 | --- | --- | --- |
-| INITIALIZE | 无 BASE，目标分支同步范围内无用户文件 | 审阅上传列表，执行 **Sync & Verify** 创建 Manifest |
-| ADOPT / Legacy repository | 无 BASE，GitHub 有文件但无 Manifest | 明确选 **Use Local** 或 **Use Remote** 后接管 |
-| BOOTSTRAP / ATTACH | GitHub 已有有效 Manifest | 按下一节新设备步骤操作 |
+| INITIALIZE | No BASE and no user files in the branch's sync scope. | Review the upload list and run **Sync & Verify** to create the Manifest. |
+| ADOPT / Legacy repository | No BASE; GitHub contains files but no Manifest. | Explicitly select **Use Local** or **Use Remote** before adoption. |
+| BOOTSTRAP / ATTACH | GitHub already has a valid Manifest. | Follow the new-device steps below. |
 
-**Use Local** 让远端同步范围与本地一致，包括覆盖远端内容、删除远端独有文件。**Use Remote** 让本地同步范围与远端一致，包括覆盖本地内容、移除本地独有文件。先审阅全部影响，再准确输入 `USE LOCAL` 或 `USE REMOTE`，点击 **Adopt & Verify**。
+**Use Local** makes the remote sync scope match local files, including overwriting remote content and deleting remote-only files. **Use Remote** makes the local scope match remote files, including overwriting local content and removing local-only files. Review all effects, type exactly `USE LOCAL` or `USE REMOTE`, and select **Adopt & Verify**. Legacy Adoption creates and verifies a GitHub backup branch before mutation.
 
-如果完整笔记都在第一台电脑，GitHub 只有初始化 README，通常应审阅 **Use Local**，列表也会显示移除该 README。全局选边仅用于无 BASE、无 Manifest 的旧仓库接管；它不是以后每次同步的固定策略。
+If the first computer contains all your notes and GitHub contains only its initial README, review **Use Local**; the plan also lists removal of that README. This global authority choice is only for adopting a repository without BASE or Manifest, not a permanent policy for future syncs.
 
-确认成功提示、BASE generation 和 Dashboard 验证状态后，再添加下一台设备。
+Confirm successful verification, BASE generation and Dashboard status before adding the next device.
 
-## Add a new device · 添加新设备
+## Add a new device
 
-1. 在 Windows、iPhone 或 Android 创建独立 Vault，安装插件。
-2. 只安装三个代码文件，**不复制旧设备的 Token、BASE、deviceId、历史或 Recovery**。
-3. 填写相同 Owner / Repository / Branch，使用本设备 Token，匹配同步范围。
-4. 运行 **Initialize / Adopt Vault** 或设置中的 **Initialize from GitHub**。
-5. 空 Vault + 有效远端 Manifest 会进入 **BOOTSTRAP**，审阅下载清单，执行 **Sync & Verify**。本地已有文件则进入 **ATTACH**，保留双方合集，逐项处理同路径不同内容冲突。
-6. 等待 Verify 成功；新设备有独立的 deviceId 和 BASE。
+1. Create an independent vault on Windows, iPhone or Android and install the plugin.
+2. Install only the plugin code files. **Do not copy another device's token, BASE, deviceId, history or Recovery state.**
+3. Set the same Owner / Repository / Branch, use this device's token, and match the sync scope.
+4. Run **Initialize / Adopt Vault** or **Initialize from GitHub** in settings.
+5. An empty vault with a valid remote Manifest enters **BOOTSTRAP**: review the download list, then select **Sync & Verify**. A vault with existing files enters **ATTACH**: keep files from both sides and review same-path content conflicts.
+6. Wait for verification to succeed. The device now has its own deviceId and BASE.
 
-不要删除 `sync-state.json` 来“重置”旧设备，这会丢失判断删除和冲突的历史。有 BASE 而远端 Manifest 缺失/损坏时，插件保持阻断，不会自动接管。
+Do not delete `sync-state.json` to reset an old device: it contains the history needed to recognize deletions and conflicts. If BASE exists but the remote Manifest is missing or invalid, synchronization stays blocked instead of automatically adopting the repository.
 
-## Manual Sync · 手动同步
+## Daily synchronization
 
-运行 **Stateful Git Sync: Sync (review first)**，先看推送、拉取、删除、重命名及冲突；列表仅显示变动文档，每页 10 条。再点击 **Sync & Verify**。超过 Delete Safety Threshold 的移除路径会弹出确认窗口，要求准确输入 `DELETE N`；默认阈值 20，重命名源路径也计入。
+Run **Stateful Git Sync: Sync (review first)**. Review pushes, pulls, deletions, renames and conflicts, then select **Sync & Verify**. The list shows changed documents, 10 per page. Removing more paths than the Delete Safety Threshold requires the exact confirmation `DELETE N`; the default threshold is 20 and rename source paths count toward it.
 
-建议开始编辑前检查远端，结束后再同步。等待同步结束再关闭应用；预览后内容改变就重新 Preview。
+Check remote changes before editing and synchronize when finished. Wait for completion before closing the app. If files change after Preview, regenerate the plan.
 
-**Open Dashboard** 显示缓存的仓库、文件数、设备、健康状态和 Recovery。独立的 **Sync History** 页面显示本机最近 100 条已验证事务，旧 JSON 仍保留。打开这两个页面不请求 GitHub，显示的不是实时在线状态；运行 Preview 才检查远端。
+On mobile, tap a file to open a separate details dialog and choose **Use LOCAL / Use REMOTE**. You can also apply **Use LOCAL / REMOTE for all conflicts** to the conflicts in the captured preview, including filtered-out conflicts. Other operations retain their planned behavior. These choices update the preview; **Sync & Verify** executes it.
 
-## Auto Sync · 自动同步
+**LOCAL** means this device; **REMOTE** means GitHub. An explicit choice includes that side's absence of a file and can therefore cause deletion. Keeping an untracked local file assigns a new identity instead of inferring a rename. Unresolved duplicate paths, invalid destinations and repository-level diagnostics still block execution.
 
-默认 **OFF**。完成初始化和一次手动同步后，可在设置中启用并保存。Vault 新增、修改、删除、重命名事件默认等待 **30 秒**再检查，只执行小规模、无冲突且通过安全检查的计划；默认最多 **5 个移除路径、20 个变化文件**。
+**Open Dashboard** shows cached repository, device, file-count, health and Recovery information. **Sync History** shows this device's latest 100 verified transactions; older JSON records remain on disk. These views do not request GitHub and are not live online status. Run Preview to check the remote state.
 
-Auto Sync 不定时轮询 GitHub，单纯打开 Obsidian 不会自动扫描或拉取。冲突、远端 Manifest 相对 BASE 变化、初始化、Adoption、范围变化、Recovery 或超阈值时，会暂停要求人工审阅。查看 Dashboard 原因，运行手动 Preview；暂停不等于同步完成。
+## Auto Sync
 
-## Verify · 验证
+Auto Sync defaults to **OFF**. After initialization and a successful manual sync, you can enable it in settings. Local vault create, modify, delete and rename events trigger a debounced check after **30 seconds** by default. It executes only small, conflict-free plans that pass safety checks; defaults allow at most **5 removed paths and 20 changed files**.
 
-执行同步时，自动核验远端提交/Tree/Manifest、本地相关字节，以及写入后的同步状态。**验证成功才更新 BASE、记录成功历史。**
+It does not periodically poll GitHub. Merely opening Obsidian does not trigger a remote scan or pull. Conflicts, a remote Manifest changed relative to BASE, initialization, Adoption, scope changes, Recovery and threshold violations pause automatic execution for manual review. Check the Dashboard reason and run Preview; a paused sync is not a completed sync.
 
-**Verify Sync (read-only)** 是只读状态检查，没有执行按钮，不下载、上传、解决冲突或推进 BASE。发现差异后回到普通 Preview；它不能替代 **Sync & Verify**。
+## Verification and conflict review
 
-## Conflict handling · 处理冲突
+Executing synchronization verifies the remote commit, Tree and Manifest, relevant local bytes, and saved sync state. **BASE advances and success history is recorded only after successful verification.**
 
-1. 阅读冲突路径，重要内容先另存副本。
-2. 点击 **Inspect both versions** 比较双方内容。
-3. 对支持选边的冲突逐项选择 **Use LOCAL** / **Use REMOTE**。选边只改变计划，最后仍需确认 **Sync & Verify**。
-4. 两边编辑都需要时，先在独立副本里人工合并，再按审阅流程保存最终内容；插件不自动做文本 merge。
+**Verify Sync (read-only)** is a status check: it does not upload, download, resolve conflicts or advance BASE. If it finds differences, return to a normal Preview.
 
-大小写/Unicode 冲突、身份不确定或路径碰撞不能强行选边。先恢复可确认的路径，或在 Obsidian 明确重命名后重试；不要删除 Manifest 或 BASE 隐藏冲突。
+For conflicts, inspect both versions and preserve independent copies of important content before choosing a side. If you need both edits, merge them manually in a separate copy, then review the final result. The plugin does not merge text automatically. Case/Unicode collisions, uncertain identity and invalid path combinations remain blocked when a safe result cannot be established; do not delete BASE or Manifest to hide them.
 
-## Recovery · 处理同步中断
+## Recover an interrupted sync
 
-网络中断、应用退出或验证失败后可能显示 **Pending Recovery**，意味着有待核查的事务，不一定意味着文件已损坏。
+Network interruption, app exit or failed verification can leave **Pending Recovery**. This means a transaction needs review; it does not by itself mean files are damaged.
 
-1. 停止新同步，保留 `.local-mirror-sync/transactions/`。
-2. 从 Dashboard 或 **Recover interrupted sync** 打开 **Review Recovery**，核对仓库、事务 ID、阶段和错误。
-3. 通常使用 **Resume Transaction**：它重查目标、提交、备份和本地状态，继续或完成验证。若仅创建对象失败、还没有候选提交，Resume 会安全清除 pending，随后重新 Preview。
-4. **Abort Transaction** 仅在尚未发布、仍为 prepared 且远端 HEAD 未变化时允许。它只移除活动指针、保留备份，不回滚笔记、BASE 或 GitHub；发布后不能用 Abort 撤销提交。
+1. Stop new syncs and preserve `.local-mirror-sync/transactions/`.
+2. Open **Review Recovery** from the Dashboard or **Recover interrupted sync**, and check the repository, transaction ID, phase and error.
+3. Use **Resume Transaction** when appropriate. It rechecks the target, commits, backups and local state before continuing or finishing verification. If object creation failed before a candidate commit existed, Resume can safely clear the pending pointer so you can generate a new Preview.
+4. **Abort Transaction** is available only for an unpublished prepared transaction with unchanged remote HEAD. It removes the active pointer while retaining backups; it does not roll back notes, BASE or GitHub, and cannot undo a published commit.
 
-`RECOVERY_ENV_CHANGED`：先核对原仓库/分支、网络和新编辑，保留独立副本，不删除恢复目录绕过保护。旧格式事务若提示 `LEGACY_CURRENT_STATE_DIFFERS`，只在界面提供时用 **Start fresh Preview from current HEAD**；它保留原 BASE 和旧事务审计，不代表旧事务已验证成功。
+For `RECOVERY_ENV_CHANGED`, check the original repository/branch, network and new edits; preserve independent copies. For an older transaction reporting `LEGACY_CURRENT_STATE_DIFFERS`, use **Start fresh Preview from current HEAD** only when the UI offers it. This preserves the original BASE and transaction audit; it does not declare the old transaction verified.
 
-恢复目录可能包含笔记原文，不自动清理。不要公开上传或单独删除被 journal 引用的 objects。无法判断时，提供脱敏错误码、版本和步骤到 Issues，不附整个 Vault、Token 或 Recovery。
+For published transactions without local writes, Recovery can verify the published snapshot and establish its BASE while preserving later edits for the next Preview. It does not overwrite new edits just to manufacture agreement.
 
-## Ignore rules / large files · 忽略规则和大文件
+Recovery objects may contain note contents and are not automatically garbage-collected. Do not publish them or remove objects referenced by journals. Report redacted error codes and reproduction steps, not a vault, token or complete Recovery directory.
 
-先读取 Vault 根目录 `.gitignore`，再应用设置 **Ignore Patterns**，每行一条 Git 风格规则：
+## Sync scope and limits
+
+Rules from the vault's root `.gitignore` are followed by **Ignore Patterns** in settings, one Git-style pattern per line:
 
 ```gitignore
 *.mp3
@@ -228,46 +195,42 @@ private/**
 .github/workflows/**
 ```
 
-音频只有匹配规则才会忽略。单个同步文件上限 **20 MiB**，Manifest 上限 **2 MiB**；大附件需忽略或另行管理。
+Audio is excluded only when a rule matches. The per-file limit is **20 MiB** and the Manifest limit is **2 MiB**. Ignore or separately manage larger attachments. Symlinks, submodules and non-portable paths are unsupported.
 
-`.git/`、`.trash/`、本插件目录、Token/状态、Recovery、本机历史、Obsidian workspace/cache 永久保护，`!**` 也不能重新纳入。`.obsidian` 默认不参与同步，开启后仍保留上述排除。
+`.git/`, `.trash/`, this plugin's directory, tokens/state, Recovery, local history and Obsidian workspace/cache files stay protected, even with `!**`. `.obsidian` is excluded by default; enabling it retains the protected exclusions.
 
-改范围可能触发 **SCOPE_REVIEW**，要求审阅而不推断删除。各设备保持规则一致；扩大范围后出现 Manifest 未跟踪的远端文件会阻断，不静默吸收。
+Scope changes can trigger **SCOPE_REVIEW** rather than inferred deletions. Keep rules consistent across devices. Newly included remote files not tracked by Manifest block the plan rather than being silently adopted.
 
-## Mobile usage · 移动端
+## Mobile and security boundaries
 
-Windows、iOS、Android 使用相同 Web/Obsidian Vault API，无 Node-only 运行时依赖。手机可从命令面板、设置和 ribbon 图标进入。
+Windows, iOS and Android use the same mobile-compatible bundle and Obsidian Vault APIs. Keep Obsidian in the foreground with a working connection during synchronization: mobile operating systems may suspend background apps, and Auto Sync is not a system background service.
 
-同步期间保持 Obsidian 前台、网络可用。系统可能暂停后台应用；Auto Sync 不是系统后台服务。切换设备后先手动 Preview 获取远端变化，每台手机独立初始化。
+Validation covers real Windows Obsidian, HTTP fixture integration and narrow/mobile emulation. **Physical iPhone and Android acceptance is still pending**; emulation does not establish a guarantee for those devices. Validate your environment with a test vault first.
 
-测试覆盖 Windows 真机 Obsidian、HTTP 仿真集成和窄屏/mobile emulation；**实体 iPhone / Android 尚未验收**，模拟结果不代表实体设备保证。请先用测试 Vault 验证自己的环境。
+The plugin accesses `api.github.com` directly over HTTPS without a relay server. Notes are **not end-to-end encrypted by this plugin**; accounts with repository access can read them. Use a private notes repository. Device names, IDs and reports can be published to that repository with related pushes. See [SECURITY.md](SECURITY.md).
 
-## Security · 安全与隐私
+Keep independent backups. Avoid concurrent writers such as another bidirectional sync engine, Git auto-commit tool or cloud drive against the same vault. The plugin does not promise that data loss is impossible.
 
-Stateful Git Sync 直接通过 HTTPS 访问 `api.github.com`，无需中转服务器。GitHub 上的笔记**不经过本插件端到端加密**，有仓库权限的账号可读取；使用私有笔记仓库。
+## Troubleshooting
 
-不要分享 Token、`data.json`、完整 Recovery 或未脱敏日志。SecretStorage 可用性取决于 Obsidian，本地回退不是加密保险箱。设备名、deviceId 和设备报告会随相关推送写入笔记仓库。详见 [SECURITY.md](SECURITY.md)。
-
-## Troubleshooting · 常见问题
-
-| 现象 | 处理 |
+| Symptom | What to check |
 | --- | --- |
-| 401 / 403 | 检查 Token 到期、仓库授权、Contents 权限、组织审批或限流 |
-| 404 / 409 或读不到分支 | 核对 Owner / Repository / Branch、访问权限及初始提交 |
-| Auto Sync 没拉取其他设备的修改 | 它不轮询，运行手动 Preview |
-| Preview 过期 | 关闭旧预览并重新生成 |
-| Pending Recovery | Review Recovery → 按情况 Resume / Abort，不删恢复目录 |
-| Manifest / Tree 不一致 | 停止其他工具写入 GitHub，保留现场并求助，不伪造 Manifest |
-| LOCAL_STATE_INVALID | 保留 state 和 Recovery，不删 state 假装成新设备 |
-| 新手机存在同名不同内容文件 | ATTACH 后逐项处理冲突，或先另存独立备份 |
-| 大文件 / 非法路径 | 忽略或拆分超限文件，处理大小写/Unicode 和 Windows 非法名称；不支持符号链接/子模块 |
-| Dashboard 看起来过时 | 它是本机缓存，运行 Preview |
+| 401 / 403 | Token expiration, repository access, Contents permission, organization approval or rate limits. |
+| 404 / 409 or missing branch | Owner, repository, branch, access and the initial commit. |
+| Auto Sync did not fetch another device's changes | Run manual Preview; Auto Sync does not poll. |
+| Stale Preview | Close it and generate a fresh plan. |
+| Pending Recovery | Review Recovery, then Resume or Abort when available; retain recovery data. |
+| Manifest / Tree mismatch | Stop external repository writers and preserve the state for investigation. |
+| LOCAL_STATE_INVALID | Preserve state and Recovery; do not delete state to impersonate a new device. |
+| Same-name files differ on a new phone | Review ATTACH conflicts or preserve independent copies first. |
+| Oversized files or invalid paths | Ignore/split large files and fix case, Unicode or Windows-invalid names. |
+| Dashboard looks stale | It is local cache; run Preview. |
 
-报告问题请提供插件/Obsidian版本、平台、错误码和合成笔记复现步骤，不粘贴 Token 或真实私人笔记。
+When reporting an issue, include plugin/Obsidian versions, platform, error codes and synthetic reproduction notes. Do not include tokens or private notes.
 
-## Development / Build · 开发与构建
+## Development
 
-需要 Node.js **24+**、npm，依赖已锁定：
+Requires Node.js **24+** and npm. Dependencies are locked:
 
 ```sh
 npm ci
@@ -276,11 +239,12 @@ npm run lint
 npm test
 npm run test:property
 npm run build
+npm run audit:public
 ```
 
-`npm test` 自动生成合成 fixtures。fixtures、profile、日志、截图、Recovery 和构建输出均不提交。bundle 位于 `dist/stateful-git-sync/`，唯一运行时外部依赖为 `obsidian`。
+`npm test` generates synthetic fixtures. Generated fixtures, profiles, logs, screenshots, Recovery and build output are not committed. The bundle is in `dist/stateful-git-sync/`; `obsidian` is its only external runtime dependency.
 
-Windows 真实应用集成测试使用独立生成的 Vault/profile 和本机 HTTP GitHub 仿真：
+Real-application integration tests run on Windows with an isolated generated vault/profile and a local HTTP GitHub fixture:
 
 ```powershell
 $env:OBSIDIAN_EXE = 'C:\Path\To\Obsidian.exe'
@@ -301,12 +265,12 @@ npm run test:obsidian:manifest
 npm run test:obsidian:brand
 ```
 
-这些套件共用固定测试端口，应顺序运行，不连接个人 Obsidian 会话。公开 CI 执行 typecheck、lint、unit/property tests、build 和公开文件审计；真实 Obsidian 测试需在已安装应用的 Windows 环境执行。
+These suites share fixed test ports and must run sequentially, without connecting to personal Obsidian sessions. Public CI runs typecheck, lint, unit/property tests, build and the public-file audit.
 
-构建后执行 `powershell -NoProfile -File scripts/package-release.ps1`，生成安装 zip 和 `SHA256SUMS.txt`。zip 内仍用兼容目录 `local-mirror-sync`。在 Git checkout 中运行 `npm run audit:public` 检查跟踪文件和 bundle；只输出路径/规则，不输出疑似秘密内容，仍需人工审阅。
+After building, `powershell -NoProfile -File scripts/package-release.ps1` produces an installation ZIP and `SHA256SUMS.txt`. The ZIP retains the compatible `local-mirror-sync` directory. `npm run audit:public` checks tracked files and bundles, reporting paths/rules without printing suspected secrets; human review is still required.
 
-改动应保持协议和状态兼容，新增行为先写回归测试。参见 [兼容契约](docs/compatibility.md) 和 [验证范围](docs/validation.md)。
+Preserve sync protocol and state compatibility. New behavior needs regression tests. See [compatibility](docs/compatibility.md) and [validation scope](docs/validation.md).
 
-## License · 许可
+## License
 
-[MIT License](LICENSE)。bundle 保留 `@noble/hashes` 和 `ignore` 的第三方许可证声明。
+[MIT](LICENSE). The bundle includes the third-party license notices for `@noble/hashes` and `ignore`.

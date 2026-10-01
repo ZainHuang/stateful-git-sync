@@ -37,4 +37,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME"
           main.js manifest.json styles.css
           --title "Stateful Git Sync $GITHUB_REF_NAME"
-          --notes "Adds Chinese and English navigation for the Community and GitHub descriptions. Sync protocol, stored data, permissions, and runtime behavior are unchanged."
+          --notes "Renames the source repository to stateful-git-sync, makes the complete English README the default with a separate Chinese guide, and explains verified multi-device synchronization, file identity, deletion tracking, explicit conflict review, and recovery. Plugin ID and sync behavior remain unchanged."
