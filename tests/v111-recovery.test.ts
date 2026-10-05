@@ -3,6 +3,7 @@ import { SyncService } from '../src/sync/execution/SyncService';
 import { LocalStateStore } from '../src/sync/state/LocalStateStore';
 import { GitFixture, WritableVault } from './v1-harness';
 import { bytes, target } from './helpers';
+import { recoveryEnvironmentChanged } from '../src/sync/execution/TransactionStore';
 
 const options = { ...target, includeObsidian: false, ignorePatterns: '', deleteSafetyThreshold: 20 };
 const pointer = '.local-mirror-sync/transactions/active.json';
@@ -22,6 +23,43 @@ async function fixture(stage = 'blobs', adoption = false) {
 }
 
 describe('V1.1.1 Recovery safety', () => {
+  it('does not direct blocked Recovery back to an unavailable Preview', () => {
+    const error = recoveryEnvironmentChanged();
+    expect(error.message).not.toMatch(/run a fresh Preview/i);
+    expect(error.message).toContain('retry Resume Transaction');
+    expect(error.message).toContain('Preview stays blocked');
+  });
+  it.each(['target', 'device'] as const)('explains a %s mismatch without changing recovery or making requests', async mismatch => {
+    const a = await fixture(); const t = (await a.service.transactions.active())!;
+    const changedOptions = mismatch === 'target' ? { ...options, branch: 'other' } : options;
+    if (mismatch === 'device') await a.state.save({ ...a.state.current(), deviceId: crypto.randomUUID() });
+    const before = a.state.current(); const stored = new Map(a.vault.internal); const calls = a.remote.calls.length;
+    await expect(a.service.resume(changedOptions, 'test')).rejects.toMatchObject({ code: 'RECOVERY_ENV_CHANGED',
+      message: expect.stringContaining(mismatch === 'target' ? 'repository/branch differs' : 'another device identity') });
+    expect(a.state.current()).toEqual(before); expect(a.vault.internal).toEqual(stored);
+    expect(await a.service.transactions.active()).toEqual(t); expect(a.remote.calls).toHaveLength(calls);
+  });
+  it('retains the backup failure code and tells the user which backup needs verification', async () => {
+    const a = await fixture('refs/heads/main', true); const t = (await a.service.transactions.active())!;
+    const transport = a.remote.transport;
+    a.remote.transport = req => req.url.includes('/ref/heads/local-mirror-sync-backup/')
+      ? Promise.resolve({ status: 403, json: {} }) : transport(req);
+    const before = a.state.current(); const stored = new Map(a.vault.internal); const head = a.remote.head;
+    await expect(a.service.resume(options, 'test')).rejects.toMatchObject({ code: 'RECOVERY_ENV_CHANGED',
+      message: expect.stringContaining(`backup ${t.backupRef}`) });
+    await expect(a.service.resume(options, 'test')).rejects.toMatchObject({ message: expect.stringContaining('HTTP_403') });
+    expect(a.state.current()).toEqual(before); expect(a.vault.internal).toEqual(stored); expect(a.remote.head).toBe(head);
+  });
+  it.each(['HTTP_503', 'NETWORK_ERROR'] as const)('keeps %s actionable within Recovery instead of directing the user to Preview', async code => {
+    const a = await fixture(); const before = a.state.current(); const stored = new Map(a.vault.internal);
+    a.remote.transport = async () => {
+      if (code === 'NETWORK_ERROR') throw new Error('offline');
+      return { status: 503, json: {} };
+    };
+    await expect(a.service.resume(options, 'test')).rejects.toMatchObject({ code,
+      message: expect.stringContaining('retry Resume Transaction') });
+    expect(a.state.current()).toEqual(before); expect(a.vault.internal).toEqual(stored);
+  });
   it('prepared transaction can abort, removing pending metadata and retaining every backup', async () => {
     const a = await fixture('blobs', true); const t = (await a.service.transactions.active())!;
     const backups = new Map([...a.vault.internal].filter(([p]) => p !== pointer));

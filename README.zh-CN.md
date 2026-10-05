@@ -217,7 +217,9 @@ Auto Sync 不定时轮询 GitHub，单纯打开 Obsidian 不会自动扫描或�
 3. 通常使用 **Resume Transaction**：它重查目标、提交、备份和本地状态，继续或完成验证。若仅创建对象失败、还没有候选提交，Resume 会安全清除 pending，随后重新 Preview。
 4. **Abort Transaction** 仅在尚未发布、仍为 prepared 且远端 HEAD 未变化时允许。它只移除活动指针、保留备份，不回滚笔记、BASE 或 GitHub；发布后不能用 Abort 撤销提交。
 
-`RECOVERY_ENV_CHANGED`：先核对原仓库/分支、网络和新编辑，保留独立副本，不删除恢复目录绕过保护。旧格式事务若提示 `LEGACY_CURRENT_STATE_DIFFERS`，只在界面提供时用 **Start fresh Preview from current HEAD**；它保留原 BASE 和旧事务审计，不代表旧事务已验证成功。
+`RECOVERY_ENV_CHANGED`：按具体提示核对仓库/分支、设备身份、远端历史或备份验证失败原因，修正条件后重试 **Resume Transaction**。普通 Preview 只有在恢复完成或安全 Abort 后才能启动。保留独立副本和恢复目录。旧格式事务若提示 `LEGACY_CURRENT_STATE_DIFFERS`，只在界面提供时用 **Start fresh Preview from current HEAD**；它保留原 BASE 和旧事务审计，不代表旧事务已验证成功。
+
+已确认发布且没有本地写入的事务（包括 **Use Local** 接管），即使另一台设备已将远端推进到后续提交，也能在校验原提交及备份后完成该快照的 BASE；后续两端改动交给新 Preview，冲突仍须明确选边。尚未确认发布或需要本地写入的接管仍要求远端为原候选提交。
 
 恢复目录可能包含笔记原文，不自动清理。不要公开上传或单独删除被 journal 引用的 objects。无法判断时，提供脱敏错误码、版本和步骤到 Issues，不附整个 Vault、Token 或 Recovery。
 

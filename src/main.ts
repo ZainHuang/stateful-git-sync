@@ -260,7 +260,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       if (isLegacyPublished(t)) modal.contentEl.createEl('p', { text: 'Legacy recovery only verifies current content. If main is the published commit or its descendant, matching current Local bytes, Remote Tree and Manifest rebuild this device’s BASE at current HEAD. Differences offer a fresh Preview with BASE unchanged and the old recovery retained for audit. Diverged history stays blocked.', cls: 'lms-muted' });
       modal.contentEl.createEl('p', { text: `Recovery folder: .local-mirror-sync/transactions/${t.id}`, cls: 'lms-head' });
       if (t.backupRef) modal.contentEl.createEl('p', { text: `GitHub backup: ${t.backupRef}\nOriginal HEAD: ${t.originalHead}`, cls: 'lms-head lms-recovery-status' });
-      modal.contentEl.createEl('p', { text: 'Resume verifies the published commit, Tree and Manifest before completing BASE. Published Push and Use Local Adoption preserve later Local edits for a new Preview. Transactions with local PULL writes must still pass Local verification. Reopening this dialog resumes interrupted work.', cls: 'lms-muted' });
+      modal.contentEl.createEl('p', { text: 'Resume verifies the published commit, Tree and Manifest before completing BASE. Published Push and Use Local Adoption preserve later Local edits for a new Preview, even when another device has advanced the branch. Transactions with local PULL writes must still pass Local verification. Complete Recovery or safely Abort before starting a new Preview.', cls: 'lms-muted' });
       modal.contentEl.createEl('p', { text: 'Abort is allowed only before publication while the main branch HEAD is unchanged. Recovery backups are retained; user files, BASE and GitHub are not changed.', cls: 'lms-muted' });
       const actions = modal.contentEl.createDiv({ cls: 'lms-device-actions' });
       let running = false;
@@ -306,8 +306,6 @@ export default class LocalMirrorSyncPlugin extends Plugin {
             abort.disabled = t.phase !== 'prepared';
             if (error instanceof PreviewError && error.code === 'LEGACY_CURRENT_STATE_DIFFERS')
               actions.createEl('button', { text: 'Start fresh Preview from current HEAD', cls: 'lms-recovery-fresh' }).onclick = () => { void run('fresh-preview'); };
-            if (error instanceof PreviewError && error.code === 'RECOVERY_ENV_CHANGED' && !actions.querySelector('.lms-recovery-preview'))
-              actions.createEl('button', { text: 'Preview again', cls: 'lms-recovery-preview' }).onclick = freshPreview;
           }
         } finally { running = false; }
       };

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 
-export async function verifyV111({ page, remote, report, runDir, preview, sync, close, state, surface, getUI, inject, setDropPatch }) {
+export async function verifyV111({ page, remote, report, runDir, preview, sync, close, state, surface, getUI, inject, setDropPatch, WritableVault, LocalStateStore, SyncService, options }) {
   const capture = async name => { await getUI().screenshot({ path: join(runDir, `${name}.png`) }); report.screenshots.push(`${name}.png`); };
   const dashboard = async () => {
     await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openDashboard());
@@ -65,7 +65,32 @@ export async function verifyV111({ page, remote, report, runDir, preview, sync, 
   await getUI().getByRole('button', { name: 'Abort Transaction', exact: true }).waitFor();
   await getUI().getByRole('button', { name: 'Abort Transaction', exact: true }).click();
   await getUI().getByText(/RECOVERY_ENV_CHANGED/).waitFor();
+  assert.equal(await getUI().getByRole('button', { name: 'Preview again', exact: true }).count(), 0,
+    'Blocked Recovery must not offer a Preview that immediately routes back to Recovery');
+  assert(!(await getUI().locator('.lms-recovery-status').innerText()).includes('run a fresh Preview'));
   assert(await active()); assert.equal(remote.head, publishedHead); assert.deepEqual(await state(), beforeRecovery);
+  const readsBeforeMismatch = remote.calls.length;
+  await page.evaluate(() => { app.plugins.plugins['local-mirror-sync'].settings.branch = 'other'; });
+  await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).click();
+  await getUI().getByText(/repository\/branch differs/).waitFor();
+  assert.equal(remote.calls.length, readsBeforeMismatch);
+  assert.equal(await getUI().getByRole('button', { name: 'Preview again', exact: true }).count(), 0);
+  assert(await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).isEnabled());
+  await page.evaluate(() => { app.plugins.plugins['local-mirror-sync'].settings.branch = 'main'; });
+  await page.evaluate(() => {
+    const plugin = app.plugins.plugins['local-mirror-sync']; const transport = plugin.sync.transport;
+    window.__failRecoveryHead = true;
+    plugin.sync.transport = req => window.__failRecoveryHead && req.method === 'GET' && req.url.endsWith('/ref/heads/main')
+      ? Promise.resolve({ status: 503, json: {} }) : transport(req);
+  });
+  await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).click();
+  await getUI().getByText(/HTTP_503/).waitFor();
+  assert((await getUI().locator('.lms-recovery-status').innerText()).includes('retry Resume Transaction'));
+  assert.equal(await getUI().getByRole('button', { name: 'Preview again', exact: true }).count(), 0);
+  assert(await active()); assert.deepEqual(await state(), beforeRecovery);
+  await page.evaluate(() => { window.__failRecoveryHead = false; });
+  await getUI().setViewportSize({ width: 390, height: 844 });
+  assert(await getUI().locator('.lms-recovery-dialog').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   await capture('v111-04-published-abort-blocked');
   await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).click();
   await surface('.lms-summary');
@@ -73,8 +98,66 @@ export async function verifyV111({ page, remote, report, runDir, preview, sync, 
   await capture('v111-05-resumed');
   await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].recoveryModal.close());
   await dashboard(); assert.match(await getUI().locator('.lms-recovery-panel').innerText(), /Healthy/);
-  report.checks.push('Lost publish response survives reload; Abort reports RECOVERY_ENV_CHANGED without mutations, Resume verifies the original published commit and clears recovery');
+  report.checks.push('Lost publish response survives reload; blocked Abort, target mismatch and HTTP_503 offer no circular Preview, preserve BASE and enable Resume after correction; Resume verifies the original published commit and clears recovery');
   await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openRecovery()); await surface('.lms-recovery-dialog');
   await getUI().getByText('No pending sync. You can run Preview again.', { exact: true }).waitFor();
   report.checks.push('Empty Recovery dialog provides a fresh Preview action after completion');
+
+  // The runner owns this generated Vault and synthetic GitHub fixture. Reuse
+  // its original uninitialized state to exercise Use Local through real buttons.
+  await page.evaluate(async original => {
+    const plugin = app.plugins.plugins['local-mirror-sync']; plugin.recoveryModal.close();
+    await plugin.metadataPending; await plugin.syncState.save(original);
+    const transport = plugin.sync.transport; let published = false;
+    plugin.sync.transport = async req => {
+      if (published && req.method === 'GET' && req.url.includes('/git/commits/')) {
+        published = false; return { status: 503, json: {} };
+      }
+      const response = await transport(req);
+      if (req.method === 'PATCH' && response.status === 200) published = true;
+      return response;
+    };
+  }, original);
+  remote.external({ 'legacy.md': '# Legacy remote' });
+  await preview(); await getUI().getByRole('button', { name: 'Use Local', exact: true }).click();
+  await getUI().getByRole('button', { name: 'Adopt & Verify', exact: true }).click();
+  await getUI().getByRole('textbox', { name: 'Adoption confirmation', exact: true }).fill('USE LOCAL');
+  await getUI().getByRole('button', { name: 'Confirm & Adopt', exact: true }).click();
+  await getUI().getByRole('button', { name: 'Review Recovery', exact: true }).waitFor();
+  const adoption = await active(); assert.equal(adoption.phase, 'published'); assert.equal(adoption.adoptionChoice, 'local');
+  assert.deepEqual(adoption.before, adoption.after);
+  const bVault = new WritableVault();
+  for (const [path, sha] of Object.entries(adoption.after)) bVault.files.set(path, remote.blobs.get(sha).slice());
+  const bState = new LocalStateStore({ read: () => bVault.readInternal('state'), write: s => bVault.writeInternal('state', s) });
+  await bState.load(); const bSync = new SyncService(bVault, req => remote.transport(req), '.obsidian', bState);
+  const bRun = async () => bSync.execute(await bSync.preview(options, 'fixture'), 'fixture');
+  await bRun(); bVault.files.set('note.md', new TextEncoder().encode('# Other device edit'));
+  bVault.files.set('other-device.md', new TextEncoder().encode('# Other device addition')); await bRun();
+  await page.evaluate(async () => {
+    const plugin = app.plugins.plugins['local-mirror-sync'];
+    await app.vault.modify(app.vault.getAbstractFileByPath('note.md'), '# Later local edit');
+    await app.vault.create('local-added.md', '# Later local addition'); await plugin.metadataPending;
+  });
+  const currentHead = remote.head; const currentManifest = remote.text('.local-mirror-sync/manifest.json');
+  await close(); await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openRecovery());
+  await surface('.lms-recovery-dialog'); await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).waitFor();
+  await getUI().setViewportSize({ width: 390, height: 844 });
+  assert(await getUI().locator('.lms-recovery-dialog').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  await capture('v111-06-adoption-advanced-main');
+  const recoveryReads = remote.calls.length;
+  await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).click(); await surface('.lms-summary');
+  await getUI().setViewportSize({ width: 390, height: 844 });
+  assert.equal(await active(), null); assert.equal((await state()).baseRemoteCommit, adoption.commit);
+  assert.deepEqual((await state()).baseManifest, adoption.manifest);
+  assert.equal(await page.evaluate(() => app.vault.adapter.read('note.md')), '# Later local edit');
+  assert.equal(await page.evaluate(() => app.vault.adapter.read('local-added.md')), '# Later local addition');
+  assert.equal(await page.evaluate(() => app.vault.adapter.exists('other-device.md')), false);
+  assert.equal(remote.head, currentHead); assert.equal(remote.text('.local-mirror-sync/manifest.json'), currentManifest);
+  assert(remote.calls.slice(recoveryReads).every(c => c.method === 'GET'));
+  const plan = await getUI().locator('.lms-modal').innerText();
+  for (const category of ['CONFLICT_CONTENT', 'PUSH_ADD', 'PULL_ADD']) assert(plan.includes(category), plan);
+  assert(await getUI().getByRole('button', { name: 'Sync & Verify', exact: true }).isDisabled());
+  assert(await getUI().locator('.lms-modal').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  await capture('v111-07-adoption-resumed-preview');
+  report.checks.push('390px published Use Local Adoption with advanced main resumes using GET-only proof of the original commit/backup; preserves both devices edits and opens normal conflict/Push/Pull Preview without applying files');
 }

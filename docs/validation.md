@@ -1,5 +1,15 @@
 # Stateful Git Sync validation
 
+## 1.1.21 - Recovery and Preview loop (2026-10-06)
+
+- RED reproduced six initial service failures and a real Obsidian Recovery dialog offering a Preview that immediately returns to Recovery. Two further RED cases covered HTTP 503 and offline guidance during Resume.
+- Recovery now reports the blocking condition and keeps retries in Recovery. Confirmed published adoption without local writes verifies the original immutable commit, Manifest/tree and backup before completing that snapshot's BASE; later edits remain for normal conflict review.
+- An initial full regression caught the existing prepared-adoption descendant restriction. The implementation was narrowed to preserve it; no existing safety assertion was removed or weakened. A new test initially used the wrong conflict label and was corrected to the existing `CONFLICT_CONTENT` contract.
+- `npm run check` passed TypeScript, both ESLint configurations, all 728 tests across 35 files (including 100 seeded property cases), and the mobile-safe build.
+- The final isolated Obsidian Recovery suite passed seven checks with zero console errors. At 390px it covers blocked Preview removal, target/network failures and retries, safe Abort, published-adoption recovery after another device advances main, and normal Push/Pull/conflict Preview. Successful published recovery makes GET-only requests and preserves later local files and current remote content.
+- Final V1 lifecycle and legacy current-HEAD Recovery regressions passed with zero console errors, including both adoption choices and the explicitly offered legacy fresh-Preview path.
+- GitHub publication, daily-Vault installation and physical phone verification are separate deployment steps. Tests use generated Vaults and a synthetic GitHub fixture.
+
 ## 1.1.18
 
 - Reproduced the Community review locally with the official Obsidian ESLint configuration: 33 source findings failed before implementation and zero remained afterward. The separate release review accounted for four more findings.

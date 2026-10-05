@@ -142,7 +142,7 @@ try {
     await verifyV112({ page, remote, report, runDir, preview, close, state, surface, getUI: () => ui, inject });
   } else if (process.argv.includes('--v111')) {
     const { verifyV111 } = await import('./v111-ui-checks.mjs');
-    await verifyV111({ page, remote, report, runDir, preview, sync, close, state, surface, getUI: () => ui, inject, setDropPatch: value => { dropPatchResponses = value; } });
+    await verifyV111({ page, remote, report, runDir, preview, sync, close, state, surface, getUI: () => ui, inject, setDropPatch: value => { dropPatchResponses = value; }, WritableVault, LocalStateStore, SyncService, options });
   } else if (process.argv.includes('--v11')) {
     const { verifyV11 } = await import('./v11-ui-checks.mjs');
     await verifyV11({ page, remote, report, runDir, preview, sync, close, screenshot, state });

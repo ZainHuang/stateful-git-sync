@@ -8,13 +8,31 @@ import { GitFixture, WritableVault } from './v1-harness';
 const options = { ...target, includeObsidian: false, ignorePatterns: '', deleteSafetyThreshold: 20 };
 const oldPath = '02_工作空间/30 营销域/设计平台/AI听记/会议.md';
 const newPath = '02_工作空间/20 电商设计平台/会议纪要/AI听记/会议.md';
-async function device(remote = new GitFixture(), files = { [oldPath]: 'meeting', 'update.md': 'original', 'delete.md': 'delete' }) {
+async function device(remote = new GitFixture(), files: Record<string, string> = { [oldPath]: 'meeting', 'update.md': 'original', 'delete.md': 'delete' }) {
   const vault = new WritableVault(files);
   const state = new LocalStateStore({ read: () => vault.readInternal('state'), write: s => vault.writeInternal('state', s) });
   await state.load();
   const service = new SyncService(vault, r => remote.transport(r), '.obsidian', state);
   const sync = async () => service.execute(await service.preview(options, 'test'), 'test');
   return { remote, vault, state, service, sync };
+}
+async function interruptPublishedAdoption(a: Awaited<ReturnType<typeof device>>) {
+  const p = a.service.selectAdoption(await a.service.preview(options, 'test'), 'local');
+  let published = false;
+  const transport = a.remote.transport;
+  a.remote.transport = async req => {
+    if (published && req.method === 'GET' && req.url.includes('/commits/')) {
+      published = false; return { status: 503, json: {} };
+    }
+    const response = await transport(req);
+    if (req.method === 'PATCH') published = true;
+    return response;
+  };
+  await expect(a.service.execute(p, 'test', undefined, undefined, 'USE LOCAL')).rejects.toThrow();
+  a.remote.transport = transport;
+  const t = (await a.service.transactions.active())!;
+  expect(t.phase).toBe('published'); expect(t.before).toEqual(t.after);
+  return t;
 }
 
 describe('Published Push BASE recovery preserves subsequent Local changes', () => {
@@ -81,6 +99,64 @@ describe('Published Push BASE recovery preserves subsequent Local changes', () =
     expect(a.state.current().baseManifest).toEqual(t.manifest); expect([...a.vault.files]).toEqual(files);
     expect(await a.service.transactions.active()).toBeNull();
     expect(a.remote.refs.get(t.backupRef!)).toBe(t.originalHead);
+    expect(a.remote.calls.slice(calls).every(c => c.method === 'GET')).toBe(true);
+  });
+
+  it('recovers published Use Local Adoption after another device advances main', async () => {
+    const a = await device(new GitFixture({ 'legacy.md': 'legacy' }));
+    const t = await interruptPublishedAdoption(a);
+    const b = await device(a.remote, { [oldPath]: 'meeting', 'update.md': 'original', 'delete.md': 'delete' });
+    await b.sync();
+    b.vault.files.set('update.md', bytes('other device edit'));
+    b.vault.files.set('remote-added.md', bytes('other device addition'));
+    await b.sync();
+    const currentHead = a.remote.head; const currentManifest = a.remote.text(MANIFEST_PATH);
+    a.vault.files.set('update.md', bytes('later local edit'));
+    a.vault.files.set('local-added.md', bytes('later local addition'));
+    const files = new Map(a.vault.files); const before = a.state.current(); const calls = a.remote.calls.length;
+    const apply = vi.spyOn(a.vault, 'apply');
+    await a.service.resume(options, 'test', undefined, t);
+    expect(before.baseManifest).toBeUndefined();
+    expect(a.state.current().baseManifest).toEqual(t.manifest);
+    expect(a.state.current().baseRemoteCommit).toBe(t.commit);
+    expect(a.vault.files).toEqual(files); expect(apply).not.toHaveBeenCalled();
+    expect(await a.service.transactions.active()).toBeNull();
+    expect(a.remote.head).toBe(currentHead); expect(a.remote.text(MANIFEST_PATH)).toBe(currentManifest);
+    expect(a.remote.refs.get(t.backupRef!)).toBe(t.originalHead);
+    const next = await a.service.preview(options, 'test');
+    expect(next.plan.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'CONFLICT_CONTENT', path: 'update.md' }),
+      expect.objectContaining({ category: 'PUSH_ADD', path: 'local-added.md' }),
+      expect.objectContaining({ category: 'PULL_ADD', path: 'remote-added.md' }),
+    ]));
+    expect(a.remote.calls.slice(calls).every(c => c.method === 'GET')).toBe(true);
+  });
+
+  it('keeps Use Remote Adoption with local writes blocked when main advances', async () => {
+    const a = await device(new GitFixture({ 'pull.md': 'remote' }));
+    const p = a.service.selectAdoption(await a.service.preview(options, 'test'), 'remote');
+    a.remote.losePatchResponse = true;
+    await expect(a.service.execute(p, 'test', undefined, undefined, 'USE REMOTE')).rejects.toThrow();
+    const t = (await a.service.transactions.active())!;
+    a.remote.external({ 'pull.md': 'later remote', [MANIFEST_PATH]: a.remote.text(MANIFEST_PATH) });
+    const before = a.state.current(); const files = new Map(a.vault.files); const calls = a.remote.calls.length;
+    await expect(a.service.resume(options, 'test')).rejects.toMatchObject({ code: 'RECOVERY_ENV_CHANGED' });
+    expect(a.state.current()).toEqual(before); expect(a.vault.files).toEqual(files);
+    expect(await a.service.transactions.active()).toEqual(t);
+    expect(a.remote.calls.slice(calls).every(c => c.method === 'GET')).toBe(true);
+  });
+
+  it.each(['diverged history', 'missing backup', 'corrupt candidate'] as const)('blocks published Use Local Recovery with %s after main advances', async failure => {
+    const a = await device(new GitFixture({ 'legacy.md': 'legacy' }));
+    const t = await interruptPublishedAdoption(a);
+    a.remote.external(Object.fromEntries(Object.keys(a.remote.contents()).map(path => [path, a.remote.text(path)])));
+    if (failure === 'diverged history') a.remote.commits.get(a.remote.head)!.parents = [];
+    if (failure === 'missing backup') a.remote.refs.delete(t.backupRef!);
+    if (failure === 'corrupt candidate') a.remote.trees.get(a.remote.commits.get(t.commit)!.tree)![oldPath] = a.remote.blob(bytes('corrupt'));
+    const before = a.state.current(); const files = new Map(a.vault.files); const head = a.remote.head; const calls = a.remote.calls.length;
+    await expect(a.service.resume(options, 'test')).rejects.toThrow();
+    expect(a.state.current()).toEqual(before); expect(a.vault.files).toEqual(files); expect(a.remote.head).toBe(head);
+    expect(await a.service.transactions.active()).toEqual(t);
     expect(a.remote.calls.slice(calls).every(c => c.method === 'GET')).toBe(true);
   });
 

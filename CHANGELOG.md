@@ -1,5 +1,11 @@
 # Stateful Git Sync changelog
 
+## 1.1.21 - Recovery and Preview loop
+
+- Pending Recovery no longer offers a Preview button after `RECOVERY_ENV_CHANGED`; the error explains that recovery or a safe Abort must finish first.
+- Recovery reports target, device identity, branch history and backup verification failures, retaining the underlying backup error code. Network errors during Resume retain their error codes and direct retries to Resume.
+- Confirmed published adoption with no local writes can verify its original commit and backup after the branch advances to a descendant, complete that snapshot's BASE and preserve later edits for the next normal Preview. Unconfirmed adoption and adoption with local writes retain the exact-HEAD requirement.
+
 ## 1.1.20 - English default and repository rename
 
 - Rename the GitHub repository to `ZainHuang/stateful-git-sync` and update installation, issue and package links.

@@ -234,23 +234,30 @@ export class SyncService {
     return this.lock(async () => {
       const t = await this.transactions.active(); if (!t) throw fail('NO_TRANSACTION', 'No pending sync transaction.');
       this.observer?.activity?.({ type: 'stage', stage: 'Revalidate', transactionId: t.id, generation: t.manifest.generation });
-      if (reviewed && JSON.stringify(reviewed) !== JSON.stringify(t)) throw isLegacyPublished(reviewed) ? legacyTransactionChanged() : recoveryEnvironmentChanged();
+      if (reviewed && JSON.stringify(reviewed) !== JSON.stringify(t)) throw isLegacyPublished(reviewed) ? legacyTransactionChanged() : recoveryEnvironmentChanged('The pending transaction changed since this dialog was opened. Reopen Recovery to review the current transaction.');
       if (isLegacyPublished(t)) return recoverLegacyPublished(t, options, token, this.vault, this.transport, this.configDir,
         this.state, this.transactions, progress, () => this.active(), this.observer);
-      if (!sameTarget(options, t.options) || this.state.current().deviceId !== t.originalState.deviceId) throw recoveryEnvironmentChanged();
+      if (!sameTarget(options, t.options)) throw recoveryEnvironmentChanged(`Current repository/branch differs from the transaction. Restore ${t.options.owner}/${t.options.repository} (${t.options.branch}) in settings.`);
+      if (this.state.current().deviceId !== t.originalState.deviceId) throw recoveryEnvironmentChanged('This transaction belongs to another device identity. Resume it on the original device/Vault. Preserve device metadata and recovery files.');
       const github = new GitHubWriter(t.options, token, this.transport);
       progress('Revalidating remote HEAD, backup ref and transaction phase…');
       const head = await github.head();
       if (t.backupRef) {
-        try { await github.verifyBackup(t.backupRef, t.originalHead); } catch { throw recoveryEnvironmentChanged(); }
+        try { await github.verifyBackup(t.backupRef, t.originalHead); }
+        catch (error) { throw recoveryEnvironmentChanged(`Cannot verify backup ${t.backupRef} at original HEAD ${t.originalHead} (${error instanceof PreviewError ? error.code : 'unavailable'}). Check repository access, network and the retained backup.`); }
       }
-      // Keep V1's pinned-commit recovery for a normal published ancestor. Adoption
-      // still requires its exact commit; an unpublished candidate requires old HEAD.
+      // A confirmed publication without local writes can finish its pinned BASE
+      // after main advances. Unconfirmed adoption and local writes keep exact HEAD.
+      const requiresExactHead = !!t.adoptionChoice && (t.phase === 'prepared' || !equalMap(t.before, t.after));
       if (t.commit === t.originalHead && t.phase === 'prepared') {
-        if (head !== t.originalHead) throw recoveryEnvironmentChanged();
+        if (head !== t.originalHead) throw recoveryEnvironmentChanged(`The unpublished transaction requires original HEAD ${t.originalHead}; current HEAD is ${head}.`);
       } else if (t.commit !== t.originalHead && head === t.originalHead) {
-        if (t.phase !== 'prepared') throw recoveryEnvironmentChanged();
-      } else if (t.adoptionChoice ? head !== t.commit : !await github.contains(t.commit, head)) throw recoveryEnvironmentChanged();
+        if (t.phase !== 'prepared') throw recoveryEnvironmentChanged(`The transaction is ${t.phase}, but the branch is back at original HEAD ${head}. The published commit must remain on this branch.`);
+      } else if (requiresExactHead ? head !== t.commit : !await github.contains(t.commit, head)) {
+        throw recoveryEnvironmentChanged(requiresExactHead
+          ? `${t.phase === 'prepared' ? 'Adoption publication is not yet confirmed' : 'Adoption still has local writes'} and requires exact HEAD ${t.commit}; current HEAD is ${head}.`
+          : `Current HEAD ${head} does not descend from transaction commit ${t.commit}. Remote history diverged.`);
+      }
       await this.revalidateTransaction(t);
       if (t.commit !== t.originalHead && head === t.originalHead) {
         if (t.adoptionChoice) { await this.verifyAdoptionLocal(t, false); await github.verifyBackup(t.backupRef!, t.originalHead); }
@@ -277,7 +284,10 @@ export class SyncService {
       // verifier, but ancestry alone does not create a published checkpoint.
       await this.completeTransaction(t, github, t.scopeKey, progress, true);
     }).catch(error => {
-      if (error instanceof PreviewError && ['REMOTE_HEAD_CHANGED', 'REMOTE_DIVERGED', 'BACKUP_VERIFY_FAILED', 'INVALID_BACKUP_REF', 'LOCAL_CHANGED'].includes(error.code)) throw recoveryEnvironmentChanged();
+      if (error instanceof PreviewError && ['REMOTE_HEAD_CHANGED', 'REMOTE_DIVERGED', 'BACKUP_VERIFY_FAILED', 'INVALID_BACKUP_REF', 'LOCAL_CHANGED'].includes(error.code)) throw recoveryEnvironmentChanged(`Recovery verification stopped (${error.code}). Review the branch history, retained backup and local changes.`);
+      if (error instanceof PreviewError && (error.code === 'NETWORK_ERROR' || /^HTTP_\d{3}$/.test(error.code))) {
+        throw new PreviewError(error.stage, error.code, 'GitHub could not be verified. Check the connection, token permissions and GitHub rate limits, then retry Resume Transaction. Recovery data is retained. Preview stays blocked until recovery completes or a safe Abort succeeds.');
+      }
       throw error;
     });
   }
@@ -298,11 +308,11 @@ export class SyncService {
     return this.lock(async () => {
       const t = await this.transactions.active(); if (!t) throw fail('NO_TRANSACTION', 'No pending sync transaction.');
       this.observer?.activity?.({ type: 'stage', stage: 'Revalidate', transactionId: t.id, generation: t.manifest.generation });
-      if (reviewed && JSON.stringify(reviewed) !== JSON.stringify(t)) throw recoveryEnvironmentChanged();
-      if (!sameTarget(options, t.options)) throw recoveryEnvironmentChanged();
+      if (reviewed && JSON.stringify(reviewed) !== JSON.stringify(t)) throw recoveryEnvironmentChanged('The pending transaction changed since review. Reopen Recovery before attempting Abort.');
+      if (!sameTarget(options, t.options)) throw recoveryEnvironmentChanged(`Current repository/branch differs from the transaction. Restore ${t.options.owner}/${t.options.repository} (${t.options.branch}) in settings.`);
       if (t.phase !== 'prepared') throw fail('ALREADY_PUBLISHED', 'This transaction may already be published or applied. Resume Transaction to finish verification.');
       const github = new GitHubWriter(t.options, token, this.transport);
-      if (await github.head() !== t.originalHead) throw recoveryEnvironmentChanged();
+      if (await github.head() !== t.originalHead) throw recoveryEnvironmentChanged('Abort requires the unchanged original branch HEAD. The branch advanced or this candidate may already be published; use Resume Transaction to verify it.');
       await this.revalidateTransaction(t);
       // Delete only the pending pointer. Journals, blobs, quarantine and backup ref
       // remain recovery evidence. Never load, repair or save BASE here.
@@ -311,7 +321,7 @@ export class SyncService {
   }
   private async revalidateTransaction(t: SyncTransaction): Promise<void> {
     this.active();
-    if (JSON.stringify(await this.transactions.active()) !== JSON.stringify(t)) throw recoveryEnvironmentChanged();
+    if (JSON.stringify(await this.transactions.active()) !== JSON.stringify(t)) throw recoveryEnvironmentChanged('The pending transaction changed during verification. Reopen Recovery to review it.');
   }
   private async recordPublication(t: SyncTransaction, event: PublishEvent): Promise<void> {
     await this.revalidateTransaction(t);
@@ -339,8 +349,9 @@ export class SyncService {
     // Only recovery of a publication with no local apply can use the published
     // snapshot alone. Mixed/PULL transactions retain full local verification.
     const publishedBaseOnly = recovering && equalMap(t.before, t.after);
+    const requiresExactHead = !!t.adoptionChoice && (t.phase === 'prepared' || !publishedBaseOnly);
     if (t.adoptionChoice) {
-      if (await github.head() !== t.commit) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed during adoption. BASE has not advanced; review recovery before a new Preview.');
+      if (requiresExactHead && await github.head() !== t.commit) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed during adoption. BASE has not advanced; review recovery before a new Preview.');
       await github.verifyBackup(t.backupRef!, t.originalHead);
       if (!publishedBaseOnly) await this.verifyAdoptionLocal(t, ['applying', 'verified', 'complete'].includes(t.phase));
       // Re-read every recovery blob before any overwrite/removal, including on resume.
@@ -374,7 +385,7 @@ export class SyncService {
     progress(publishedBaseOnly ? 'Completing published BASE; subsequent Local changes remain for Preview' : 'Verifying local bytes before saving BASE');
     if (!publishedBaseOnly) { this.stage('Verify local'); await verifyLocal(this.vault, t, ignore, (processed, total) => this.stage('Verify local', processed, total)); }
     const finalHead = await github.head();
-    if (t.adoptionChoice ? finalHead !== t.commit : !await github.contains(t.commit, finalHead)) throw fail('REMOTE_DIVERGED', 'Remote history changed. BASE has not advanced.');
+    if (requiresExactHead ? finalHead !== t.commit : !await github.contains(t.commit, finalHead)) throw fail('REMOTE_DIVERGED', 'Remote history changed. BASE has not advanced.');
     await this.revalidateTransaction(t);
     if (JSON.stringify(this.state.current()) !== stateKey) throw recoveryEnvironmentChanged();
     t.phase = 'verified'; await this.transactions.save(t);

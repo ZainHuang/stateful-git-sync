@@ -27,7 +27,7 @@ export interface SyncTransaction {
 const ROOT = '.local-mirror-sync/transactions';
 export const sameTransactionTarget = (a: Pick<PreviewOptions, 'owner' | 'repository' | 'branch'>, b: Pick<PreviewOptions, 'owner' | 'repository' | 'branch'>) => a.owner.toLowerCase() === b.owner.toLowerCase() && a.repository.toLowerCase() === b.repository.toLowerCase() && a.branch === b.branch;
 export const recoveryError = () => new PreviewError('RECOVERY', 'RECOVERY_REQUIRED', 'A pending or damaged transaction needs recovery. No new sync can start. Recovery files remain in .local-mirror-sync/transactions.');
-export const recoveryEnvironmentChanged = () => new PreviewError('RECOVERY', 'RECOVERY_ENV_CHANGED', 'Recovery environment changed or could not be verified. Review the transaction and run a fresh Preview. Pending recovery remains blocked until it can be safely resumed or aborted.');
+export const recoveryEnvironmentChanged = (detail = 'Recovery environment changed or could not be verified.') => new PreviewError('RECOVERY', 'RECOVERY_ENV_CHANGED', `${detail} Recovery data is retained. Preview stays blocked until recovery completes or a safe Abort succeeds. Correct the reported condition, then retry Resume Transaction.`);
 function unpack(raw: string | null): unknown {
   if (!raw) throw recoveryError();
   const envelope: unknown = JSON.parse(raw);

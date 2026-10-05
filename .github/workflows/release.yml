@@ -37,4 +37,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME"
           main.js manifest.json styles.css
           --title "Stateful Git Sync $GITHUB_REF_NAME"
-          --notes "Renames the source repository to stateful-git-sync, makes the complete English README the default with a separate Chinese guide, and explains verified multi-device synchronization, file identity, deletion tracking, explicit conflict review, and recovery. Plugin ID and sync behavior remain unchanged."
+          --notes "Fixes the Resume/Preview recovery loop. Recovery now reports specific blocking conditions and keeps network retries in Resume. Confirmed published adoption without local writes can complete its verified snapshot BASE after another device advances main, preserving later edits for normal conflict review. Unconfirmed adoption, local-write checks, backups and verification remain protected. 修复 Resume 与 Preview 互相跳转；恢复失败显示具体原因。已确认发布且无本地写入的接管事务可在远端推进后完成原快照校验，保留后续编辑供新 Preview 审阅。728 tests, TypeScript, standard and Obsidian lint, mobile-safe build, and isolated Obsidian recovery/lifecycle regressions passed."
