@@ -1,5 +1,14 @@
 # Stateful Git Sync validation
 
+## 1.1.22 - Published Recovery with local changes (2026-10-06)
+
+- RED reproduced the hidden affected path and missing fresh-Preview action for interrupted published PULL/Bootstrap transactions. The old real Obsidian bundle also failed because `LOCAL_CHANGED` omitted `note.md`. An earlier UI fixture interception failed before the target interaction and is retained separately as setup evidence, not counted as RED.
+- Added 23 regression cases covering explicit replan with unchanged BASE/current files, verified backup blobs and durable audit, partial PULL, Bootstrap/ATTACH, descendant HEAD, recorded rename/delete, adoption backups, no PASS history, and target/device/scope/BASE/history/blob/audit/race failures. Existing tests and safety assertions remain intact. Initial new assertions were aligned with the existing `CONFLICT_ADD_ADD` and `ALREADY_CONVERGED` labels; planner behavior was not changed.
+- `npm run check` passed TypeScript, standard and Obsidian ESLint, all 751 tests across 36 files, and the mobile-safe build. The separate 100-case seeded property suite passed.
+- The final 1.1.22 isolated Obsidian Recovery suite passed eight checks with zero console errors. It verifies path diagnostics, enabled Resume, blocked Abort, the explicit fresh-Preview action at 390px, retained journals, unchanged BASE/Local/remote HEAD and GET-only recovery requests. Resulting conflicts remain unresolved and Sync & Verify stays disabled until reviewed. V1 lifecycle (13 checks) and legacy current-HEAD Recovery (11 checks) also passed with zero console errors.
+- Public candidate audit passed with 146 files, two bundles and zero findings. The installation ZIP contains exactly `main.js`, `manifest.json` and `styles.css`; their bytes match the built assets. Recovery pointers/audits are local metadata; Manifest, BASE advancement, normal planner and Abort safety retain their existing rules.
+- Logs and screenshots are retained in the ignored `test-results/recovery-local-changes` and generated `artifacts/v1-e2e-*` directories. Tests use generated Vaults and a synthetic GitHub fixture; they do not operate the user's phone or daily Vault.
+
 ## 1.1.21 - Recovery and Preview loop (2026-10-06)
 
 - RED reproduced six initial service failures and a real Obsidian Recovery dialog offering a Preview that immediately returns to Recovery. Two further RED cases covered HTTP 503 and offline guidance during Resume.

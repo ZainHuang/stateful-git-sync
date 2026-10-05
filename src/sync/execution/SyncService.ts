@@ -23,7 +23,7 @@ import type { SyncDecision } from '../planner/SyncDecision';
 import { DEVICE_REPORT_ROOT, type SyncObserver } from '../../product/ProductStore';
 import type { Settings } from '../../settings/settings';
 import { isLegacyPublished, legacyTransactionChanged, recoverLegacyPublished } from './LegacyPublishedRecovery';
-import { validateManifestTree } from '../manifest/ManifestConsistency';
+import { validateManifestHistory, validateManifestTree } from '../manifest/ManifestConsistency';
 import { manifestCommitParents } from '../manifest/RemoteManifestAudit';
 import { transactionIgnore, verifyLocal } from './LocalVerification';
 import { cleanupEmptyFolders } from './EmptyFolderCleanup';
@@ -284,24 +284,78 @@ export class SyncService {
       // verifier, but ancestry alone does not create a published checkpoint.
       await this.completeTransaction(t, github, t.scopeKey, progress, true);
     }).catch(error => {
-      if (error instanceof PreviewError && ['REMOTE_HEAD_CHANGED', 'REMOTE_DIVERGED', 'BACKUP_VERIFY_FAILED', 'INVALID_BACKUP_REF', 'LOCAL_CHANGED'].includes(error.code)) throw recoveryEnvironmentChanged(`Recovery verification stopped (${error.code}). Review the branch history, retained backup and local changes.`);
+      if (error instanceof PreviewError && error.code === 'LOCAL_CHANGED') throw new PreviewError('RECOVERY', 'RECOVERY_LOCAL_CHANGED',
+        `Recovery stopped to preserve current Local files.\n${error.message}\nChoose Start fresh Preview from current HEAD to verify this transaction, keep current files and BASE, and review the differences before syncing.`);
+      if (error instanceof PreviewError && ['REMOTE_HEAD_CHANGED', 'REMOTE_DIVERGED', 'BACKUP_VERIFY_FAILED', 'INVALID_BACKUP_REF'].includes(error.code)) throw recoveryEnvironmentChanged(`Recovery verification stopped (${error.code}). Review the branch history and retained backup. ${error.message}`);
       if (error instanceof PreviewError && (error.code === 'NETWORK_ERROR' || /^HTTP_\d{3}$/.test(error.code))) {
         throw new PreviewError(error.stage, error.code, 'GitHub could not be verified. Check the connection, token permissions and GitHub rate limits, then retry Resume Transaction. Recovery data is retained. Preview stays blocked until recovery completes or a safe Abort succeeds.');
       }
       throw error;
     });
   }
-  /** Explicitly retire a legacy ancestor after fresh read-only verification.
+  /** Explicitly retain an interrupted transaction for audit after fresh proof.
    * The next preview uses the ordinary planner and the unchanged local BASE. */
   async startFreshPreviewFromCurrentHead(options: PreviewOptions, token: string, progress: Progress = () => {}, reviewed?: SyncTransaction): Promise<void> {
     return this.lock(async () => {
       const t = await this.transactions.active();
-      if (!t || !isLegacyPublished(t)) throw fail('LEGACY_FRESH_PREVIEW_UNAVAILABLE', 'Fresh Preview is only available for a legacy published ancestor.');
+      if (!t) throw fail('LEGACY_FRESH_PREVIEW_UNAVAILABLE', 'No pending transaction can be reviewed for fresh Preview.');
       this.observer?.activity?.({ type: 'stage', stage: 'Revalidate', transactionId: t.id, generation: t.manifest.generation });
-      if (reviewed && JSON.stringify(reviewed) !== JSON.stringify(t)) throw legacyTransactionChanged();
-      await recoverLegacyPublished(t, options, token, this.vault, this.transport, this.configDir,
+      if (reviewed && JSON.stringify(reviewed) !== JSON.stringify(t)) throw isLegacyPublished(t) ? legacyTransactionChanged() : recoveryEnvironmentChanged('The pending transaction changed since review. Reopen Recovery before starting fresh Preview.');
+      if (isLegacyPublished(t)) await recoverLegacyPublished(t, options, token, this.vault, this.transport, this.configDir,
         this.state, this.transactions, progress, () => this.active(), this.observer, 'fresh-preview');
+      else await this.replanPublishedLocalWrites(t, options, token, progress);
     });
+  }
+  private async replanPublishedLocalWrites(t: SyncTransaction, options: PreviewOptions, token: string, progress: Progress): Promise<void> {
+    if (t.phase === 'prepared' || equalMap(t.before, t.after)) throw fail('LEGACY_FRESH_PREVIEW_UNAVAILABLE', 'Fresh Preview requires a confirmed transaction with local writes. Use Resume or safe Abort for this transaction.');
+    if (!sameTarget(options, t.options)) throw recoveryEnvironmentChanged('Current repository/branch differs from the transaction. Restore the transaction target in settings.');
+    const previous = this.state.current(); const stateKey = JSON.stringify(previous);
+    if (previous.deviceId !== t.originalState.deviceId || previous.target && !sameTarget(previous.target, t.options)) throw recoveryEnvironmentChanged('This transaction or BASE belongs to another device or repository.');
+    const sameBase = (base: LocalSyncState) => previous.baseRemoteCommit === base.baseRemoteCommit
+      && JSON.stringify(previous.baseManifest) === JSON.stringify(base.baseManifest) && previous.syncScope === base.syncScope;
+    const completedBase = previous.baseRemoteCommit === t.commit && JSON.stringify(previous.baseManifest) === JSON.stringify(t.manifest) && previous.syncScope === t.scopeKey;
+    if (!sameBase(t.originalState) && !completedBase) throw recoveryEnvironmentChanged('Current BASE differs from the original or verified transaction BASE. It cannot be replaced or discarded.');
+    const rules = JSON.parse(t.scopeKey) as { configDir: string; gitignore: string };
+    if (rules.configDir !== this.configDir || options.includeObsidian !== t.options.includeObsidian || options.ignorePatterns !== t.options.ignorePatterns) throw recoveryEnvironmentChanged('Configuration directory or ignore settings differ from the reviewed transaction scope.');
+    const github = new GitHubWriter(t.options, token, this.transport); const head = await github.head();
+    if (!await github.contains(t.commit, head)) throw recoveryEnvironmentChanged('Current branch does not descend from the transaction commit. Remote history must be corrected before fresh Preview.');
+    const verifyContext = async () => {
+      await this.revalidateTransaction(t);
+      if (JSON.stringify(this.state.current()) !== stateKey) throw recoveryEnvironmentChanged('Device metadata changed during recovery review. Reopen Recovery.');
+      if (await github.head() !== head) throw recoveryEnvironmentChanged('Remote HEAD changed during recovery review. Reopen Recovery to review the new HEAD.');
+      if (t.backupRef) await github.verifyBackup(t.backupRef, t.originalHead);
+    };
+    progress('Verifying published transaction and retained recovery copies…'); await verifyContext();
+    await this.verifyRemoteCandidate(t, github);
+    const reviewedIgnore = transactionIgnore(t);
+    const eligible = (path: string) => !reviewedIgnore.reason(path) && !t.excludedPaths.includes(path);
+    if (!equalMap(t.after, Object.fromEntries(Object.values(t.manifest.files).filter(f => !f.deleted && eligible(f.path)).map(f => [f.path, f.blobSha!])))) throw recoveryError();
+    for (const sha of new Set([...Object.values(t.before), ...Object.values(t.after)])) await this.transactions.blob(t.id, sha);
+    const capture = await new PreviewSnapshotReader(this.vault, this.transport, this.configDir).read(t.options, token, progress, undefined, (stage, processed, total) => this.stage(stage, processed, total));
+    if (capture.remote.remoteHeadSha !== head) throw recoveryEnvironmentChanged('Remote HEAD changed while reading the current snapshot. Retry recovery review.');
+    const ruleSha = capture.local.files.find(f => f.path === '.gitignore')?.sha;
+    if (capture.gitignore !== rules.gitignore && (!('.gitignore' in t.before || '.gitignore' in t.after) || ruleSha !== t.after['.gitignore'])) throw recoveryEnvironmentChanged('Local .gitignore differs from both the reviewed and transaction rules. Restore the reviewed scope before recovery.');
+    const manifest = await new RemoteManifestReader(capture.client).read(capture.remote);
+    if (!manifest) throw fail('REMOTE_MANIFEST_MISSING', 'Current HEAD has no Manifest. Recovery is retained.');
+    validateManifestHistory(t.manifest, manifest); validateManifestHistory(previous.baseManifest ?? null, manifest);
+    validateManifestTree(manifest, capture.remote.entries.filter(f => f.type !== 'tree' && !capture.ignore.reason(f.path)), path => !capture.ignore.reason(path));
+    const local = Object.fromEntries(capture.local.files.map(f => [f.path, f.sha]));
+    const differences = [...new Set([...Object.keys(t.after), ...Object.keys(local)])].sort().filter(path => t.after[path] !== local[path])
+      .map(path => `${path}: expected ${t.after[path] ?? '(absent)'}, current ${local[path] ?? '(absent)'}`);
+    progress('Retaining current Local bytes before starting a reviewed Preview…');
+    for (const file of capture.local.files) {
+      if (file.size > MAX_SYNC_FILE_BYTES) throw fail('FILE_TOO_LARGE', 'A current Local file exceeds the 20 MiB recovery limit. Recovery is retained.');
+      const content = new Uint8Array(await this.vault.readBinary(file.path));
+      if (gitBlobSha(content) !== file.sha) throw recoveryEnvironmentChanged(`Local file changed during recovery review: ${file.path}. Retry after editing stops.`);
+      await this.transactions.putBlob(t.id, content);
+    }
+    await capture.verify(); await verifyContext();
+    await this.transactions.retainFreshPreview(t, { head, generation: manifest.generation, baseState: previous, local, differences });
+    await capture.verify(); await verifyContext();
+    // Keep original phase/journals and BASE. This is explicit replanning, never
+    // Abort, successful verification, or authority to replay the old writes.
+    await this.transactions.clear(); await this.observer?.recoveryCleared?.();
+    progress('Recovery retained for audit. BASE and current files are unchanged. Review the fresh Preview before syncing.');
   }
   /** V1.1.1 user-facing Abort: only an unpublished transaction at unchanged HEAD. */
   async abortTransaction(options: PreviewOptions, token: string, reviewed?: SyncTransaction): Promise<void> {
@@ -442,15 +496,16 @@ export class SyncService {
     const gitignore = ruleBytes ? new TextDecoder('utf-8', { fatal: true }).decode(ruleBytes) : '';
     const appliedRules = allowApplied && ('.gitignore' in t.before || '.gitignore' in t.after);
     if (gitignore !== rules.gitignore && !(appliedRules && (ruleBytes ? gitBlobSha(ruleBytes) : undefined) === t.after['.gitignore'])) {
-      throw fail('LOCAL_CHANGED', 'Ignore rules changed. Review recovery and refresh Preview.');
+      throw fail('RECOVERY_SCOPE_CHANGED', 'Local .gitignore differs from the reviewed transaction rules. Preserve its current contents and restore the reviewed sync scope before resuming.');
     }
     // Continue the reviewed scope even if .gitignore itself was part of the apply.
     const ignore = new IgnoreService({ configDir: this.configDir, includeObsidian: t.options.includeObsidian, patterns: t.options.ignorePatterns, gitignore: rules.gitignore });
     const scan = await new VaultScanner(this.vault).scan(ignore);
     const actual = Object.fromEntries(scan.files.filter(f => !t.excludedPaths.includes(f.path)).map(f => [f.path, f.sha]));
     const paths = new Set([...Object.keys(actual), ...Object.keys(t.before), ...Object.keys(t.after)]);
-    if ([...paths].some(path => actual[path] !== t.before[path] && (!allowApplied || actual[path] !== t.after[path]))) {
-      throw fail('LOCAL_CHANGED', 'Local files changed since Preview. Review recovery and refresh Preview.');
+    const differences = [...paths].filter(path => actual[path] !== t.before[path] && (!allowApplied || actual[path] !== t.after[path]));
+    if (differences.length) {
+      throw fail('LOCAL_CHANGED', `Local files differ from the reviewed transaction (${differences.length}):\n${differences.slice(0, 20).map(path => `${path}: ${!actual[path] ? 'missing' : !t.before[path] && !t.after[path] ? 'added' : 'modified'}`).join('\n')}${differences.length > 20 ? '\nAdditional differences will be retained during fresh Preview review.' : ''}`);
     }
   }
   private stage(stage: ActivityStage, processed?: number, total?: number): void { this.observer?.activity?.({ type: 'stage', stage, processed, total }); }

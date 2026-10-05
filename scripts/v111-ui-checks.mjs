@@ -108,7 +108,7 @@ export async function verifyV111({ page, remote, report, runDir, preview, sync, 
   await page.evaluate(async original => {
     const plugin = app.plugins.plugins['local-mirror-sync']; plugin.recoveryModal.close();
     await plugin.metadataPending; await plugin.syncState.save(original);
-    const transport = plugin.sync.transport; let published = false;
+    const transport = plugin.sync.transport; window.__v111BeforeAdoptionTransport = transport; let published = false;
     plugin.sync.transport = async req => {
       if (published && req.method === 'GET' && req.url.includes('/git/commits/')) {
         published = false; return { status: 503, json: {} };
@@ -160,4 +160,48 @@ export async function verifyV111({ page, remote, report, runDir, preview, sync, 
   assert(await getUI().locator('.lms-modal').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   await capture('v111-07-adoption-resumed-preview');
   report.checks.push('390px published Use Local Adoption with advanced main resumes using GET-only proof of the original commit/backup; preserves both devices edits and opens normal conflict/Push/Pull Preview without applying files');
+
+  // A published transaction with PULL writes must preserve an unexpected edit,
+  // then let the user explicitly replan instead of endlessly retrying Resume.
+  await close();
+  await page.evaluate(async () => {
+    const plugin = app.plugins.plugins['local-mirror-sync']; plugin.sync.transport = window.__v111BeforeAdoptionTransport; await plugin.metadataPending;
+    const p = await plugin.sync.preview(plugin.settings, plugin.tokens.read(plugin.settings));
+    const reviewed = plugin.sync.resolveAll(p, 'remote');
+    const apply = plugin.sync.vault.apply; let interrupted = false;
+    plugin.sync.vault.apply = async (...args) => {
+      if (!interrupted && args[0] === 'note.md') { interrupted = true; throw new Error('Fixture interrupted before local Pull'); }
+      return apply(...args);
+    };
+    try { await plugin.sync.execute(reviewed, plugin.tokens.read(plugin.settings)); }
+    catch (error) { if (!String(error).includes('Fixture interrupted')) throw error; }
+    await app.vault.modify(app.vault.getAbstractFileByPath('note.md'), '# Possible accidental mobile edit'); await plugin.metadataPending;
+  });
+  const localWriteTransaction = await active(); assert.equal(localWriteTransaction.phase, 'published');
+  assert.notDeepEqual(localWriteTransaction.before, localWriteTransaction.after);
+  const unchangedBase = await state(); const replannedHead = remote.head; const readsBeforeReplan = remote.calls.length;
+  await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openRecovery()); await surface('.lms-recovery-dialog');
+  await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).click();
+  await getUI().getByText(/LOCAL_CHANGED/).waitFor();
+  await capture('v111-08-local-write-blocked');
+  assert((await getUI().locator('.lms-recovery-status').innerText()).includes('note.md'), 'Recovery must name the affected local path');
+  const fresh = getUI().getByRole('button', { name: 'Start fresh Preview from current HEAD', exact: true });
+  await fresh.waitFor({ timeout: 5000 });
+  assert(await getUI().getByRole('button', { name: 'Resume Transaction', exact: true }).isEnabled());
+  assert(await getUI().getByRole('button', { name: 'Abort Transaction', exact: true }).isDisabled());
+  await getUI().setViewportSize({ width: 390, height: 844 });
+  assert(await getUI().locator('.lms-recovery-dialog').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  await fresh.scrollIntoViewIfNeeded();
+  await capture('v111-09-local-changes-mobile');
+  await fresh.click(); await surface('.lms-summary');
+  await getUI().setViewportSize({ width: 390, height: 844 });
+  assert.equal(await active(), null); assert.deepEqual(await state(), unchangedBase); assert.equal(remote.head, replannedHead);
+  assert.equal(await page.evaluate(() => app.vault.adapter.read('note.md')), '# Possible accidental mobile edit');
+  assert(remote.calls.slice(readsBeforeReplan).every(c => c.method === 'GET'));
+  assert((await getUI().locator('.lms-modal').innerText()).includes('CONFLICT_CONTENT'));
+  assert(await getUI().locator('.lms-modal').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  assert(await getUI().getByRole('button', { name: 'Sync & Verify', exact: true }).isDisabled());
+  assert.equal(await page.evaluate(id => app.vault.adapter.exists(`.local-mirror-sync/transactions/${id}/journal.json`), localWriteTransaction.id), true);
+  await capture('v111-10-local-changes-replanned');
+  report.checks.push('Published PULL with an unexpected local edit names note.md, keeps Resume enabled and Abort blocked at 390px, and explicitly starts a verified fresh Preview with BASE/current bytes/GitHub unchanged and an unresolved conflict');
 }

@@ -219,6 +219,8 @@ Auto Sync 不定时轮询 GitHub，单纯打开 Obsidian 不会自动扫描或�
 
 `RECOVERY_ENV_CHANGED`：按具体提示核对仓库/分支、设备身份、远端历史或备份验证失败原因，修正条件后重试 **Resume Transaction**。普通 Preview 只有在恢复完成或安全 Abort 后才能启动。保留独立副本和恢复目录。旧格式事务若提示 `LEGACY_CURRENT_STATE_DIFFERS`，只在界面提供时用 **Start fresh Preview from current HEAD**；它保留原 BASE 和旧事务审计，不代表旧事务已验证成功。
 
+`RECOVERY_LOCAL_CHANGED` / `LOCAL_VERIFY_FAILED`：查看提示中的具体文件。已发布且包含本地写入的事务，在本地差异阻塞时可提供 **Start fresh Preview from current HEAD**。主动点击后，插件重新核对已发布事务、当前远端状态和保留的恢复副本，备份手机当前文件，保持文件和 BASE 不变，保留原事务与审计记录，再打开普通 Preview 供你逐项审阅冲突。它不会重放旧覆盖操作，也不把中断事务记录为成功。`RECOVERY_SCOPE_CHANGED` 等同步范围变化须先修正。
+
 已确认发布且没有本地写入的事务（包括 **Use Local** 接管），即使另一台设备已将远端推进到后续提交，也能在校验原提交及备份后完成该快照的 BASE；后续两端改动交给新 Preview，冲突仍须明确选边。尚未确认发布或需要本地写入的接管仍要求远端为原候选提交。
 
 恢复目录可能包含笔记原文，不自动清理。不要公开上传或单独删除被 journal 引用的 objects。无法判断时，提供脱敏错误码、版本和步骤到 Issues，不附整个 Vault、Token 或 Recovery。

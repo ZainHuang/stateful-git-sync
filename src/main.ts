@@ -247,20 +247,21 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     let closed = false;
     modal.onClose = () => { closed = true; this.reviewing = false; };
     const status = modal.contentEl.createEl('p', { text: 'Checking pending transaction…', cls: 'lms-status lms-recovery-status', attr: { role: 'status' } });
-    void this.sync.transactions.active().then(t => {
+    void this.sync.transactions.active().then(pending => {
       if (closed) return;
       const freshPreview = () => { modal.close(); this.openPreview(); };
-      if (!t) {
+      if (!pending) {
         status.setText('No pending sync. You can run Preview again.');
         modal.contentEl.createEl('button', { text: 'Preview again' }).onclick = freshPreview;
         return;
       }
+      let t = pending;
       status.setText('Pending Recovery');
-      recoveryDetails(modal.contentEl, t);
+      const details = modal.contentEl.createDiv(); recoveryDetails(details, t);
       if (isLegacyPublished(t)) modal.contentEl.createEl('p', { text: 'Legacy recovery only verifies current content. If main is the published commit or its descendant, matching current Local bytes, Remote Tree and Manifest rebuild this device’s BASE at current HEAD. Differences offer a fresh Preview with BASE unchanged and the old recovery retained for audit. Diverged history stays blocked.', cls: 'lms-muted' });
       modal.contentEl.createEl('p', { text: `Recovery folder: .local-mirror-sync/transactions/${t.id}`, cls: 'lms-head' });
       if (t.backupRef) modal.contentEl.createEl('p', { text: `GitHub backup: ${t.backupRef}\nOriginal HEAD: ${t.originalHead}`, cls: 'lms-head lms-recovery-status' });
-      modal.contentEl.createEl('p', { text: 'Resume verifies the published commit, Tree and Manifest before completing BASE. Published Push and Use Local Adoption preserve later Local edits for a new Preview, even when another device has advanced the branch. Transactions with local PULL writes must still pass Local verification. Complete Recovery or safely Abort before starting a new Preview.', cls: 'lms-muted' });
+      modal.contentEl.createEl('p', { text: 'Resume verifies the published commit, Tree and Manifest before completing BASE. Published Push and Use Local Adoption preserve later Local edits for a new Preview, even when another device has advanced the branch. Transactions with local PULL writes must still pass Local verification. If Local changes block a published transaction, Start fresh Preview from current HEAD rechecks it and retains current files, BASE and recovery backups for conflict review.', cls: 'lms-muted' });
       modal.contentEl.createEl('p', { text: 'Abort is allowed only before publication while the main branch HEAD is unchanged. Recovery backups are retained; user files, BASE and GitHub are not changed.', cls: 'lms-muted' });
       const actions = modal.contentEl.createDiv({ cls: 'lms-device-actions' });
       let running = false;
@@ -301,10 +302,17 @@ export default class LocalMirrorSyncPlugin extends Plugin {
         } catch (error) {
           await this.recordFailure(error);
           if (!closed) {
+            // Resume may have durably advanced its own checkpoint before failing.
+            // Refresh only phase/publication evidence; replaced plans need review.
+            const current = await this.sync.transactions.active().catch(() => null);
+            if (current && JSON.stringify({ ...t, phase: current.phase, publication: current.publication }) === JSON.stringify(current)) {
+              t = current; details.empty(); recoveryDetails(details, t);
+            }
             status.setText(safeError(error)); actions.querySelectorAll('button').forEach(b => { b.disabled = false; });
             status.scrollIntoView({ block: 'nearest' });
             abort.disabled = t.phase !== 'prepared';
-            if (error instanceof PreviewError && error.code === 'LEGACY_CURRENT_STATE_DIFFERS')
+            if (error instanceof PreviewError && (error.code === 'LEGACY_CURRENT_STATE_DIFFERS'
+              || !isLegacyPublished(t) && t.phase !== 'prepared' && ['RECOVERY_LOCAL_CHANGED', 'LOCAL_VERIFY_FAILED'].includes(error.code)))
               actions.createEl('button', { text: 'Start fresh Preview from current HEAD', cls: 'lms-recovery-fresh' }).onclick = () => { void run('fresh-preview'); };
           }
         } finally { running = false; }

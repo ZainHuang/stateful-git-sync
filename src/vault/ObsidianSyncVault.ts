@@ -57,7 +57,7 @@ export function obsidianSyncVault(vault: Vault): SyncVault {
       if (path.startsWith('.local-mirror-sync/')) throw new Error('Protected path');
       const current = await hash(path); const desired = data ? gitBlobSha(data) : null;
       if (current === desired) return;
-      const changed = () => new PreviewError('LOCAL_APPLY', 'LOCAL_CHANGED', 'Local content changed during sync. Original and concurrent bytes are preserved in transaction backups/quarantine. Review them before resuming.');
+      const changed = () => new PreviewError('LOCAL_APPLY', 'LOCAL_CHANGED', `Local content differs at ${path}. Current contents are retained; transaction recovery copies are available. Review this file before resuming.`);
       const recovered = await hash(recoveryPath);
       if (current !== expected && !(current === null && recovered === expected && expected !== null)) throw changed();
       const tracked = vault.getAbstractFileByPath(path);

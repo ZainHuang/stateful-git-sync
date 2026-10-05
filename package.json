@@ -1,6 +1,6 @@
 {
   "name": "stateful-git-sync",
-  "version": "1.1.21",
+  "version": "1.1.22",
   "private": true,
   "description": "Synchronize vaults across devices via GitHub using verified baselines, file identities and deletion records, with explicit conflict review and recovery.",
   "type": "module",

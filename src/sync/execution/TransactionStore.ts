@@ -28,6 +28,10 @@ const ROOT = '.local-mirror-sync/transactions';
 export const sameTransactionTarget = (a: Pick<PreviewOptions, 'owner' | 'repository' | 'branch'>, b: Pick<PreviewOptions, 'owner' | 'repository' | 'branch'>) => a.owner.toLowerCase() === b.owner.toLowerCase() && a.repository.toLowerCase() === b.repository.toLowerCase() && a.branch === b.branch;
 export const recoveryError = () => new PreviewError('RECOVERY', 'RECOVERY_REQUIRED', 'A pending or damaged transaction needs recovery. No new sync can start. Recovery files remain in .local-mirror-sync/transactions.');
 export const recoveryEnvironmentChanged = (detail = 'Recovery environment changed or could not be verified.') => new PreviewError('RECOVERY', 'RECOVERY_ENV_CHANGED', `${detail} Recovery data is retained. Preview stays blocked until recovery completes or a safe Abort succeeds. Correct the reported condition, then retry Resume Transaction.`);
+function pack(value: unknown): string {
+  const payload = JSON.stringify(value);
+  return JSON.stringify({ sha: gitBlobSha(new TextEncoder().encode(payload)), payload });
+}
 function unpack(raw: string | null): unknown {
   if (!raw) throw recoveryError();
   const envelope: unknown = JSON.parse(raw);
@@ -94,14 +98,18 @@ export class TransactionStore {
     } catch { throw recoveryError(); }
   }
   async save(t: SyncTransaction): Promise<void> {
-    const payload = JSON.stringify(t);
-    const envelope = JSON.stringify({ sha: gitBlobSha(new TextEncoder().encode(payload)), payload });
+    const envelope = pack(t);
     // Both copies must be read back before publication can begin. A torn later
     // checkpoint can recover the already-durable candidate commit from either copy.
     await this.write(`${this.directory(t.id)}/journal.json`, envelope);
     await this.write(`${this.directory(t.id)}/journal-copy.json`, envelope);
   }
   async begin(t: SyncTransaction) { if (await this.active()) throw recoveryError(); await this.save(t); await this.write(`${ROOT}/active.json`, JSON.stringify(t.id)); }
+  async retainFreshPreview(t: SyncTransaction, review: { head: string; generation: number; baseState: LocalSyncState; local: Record<string, string>; differences: string[] }) {
+    await this.write(`${this.directory(t.id)}/fresh-preview-${crypto.randomUUID()}.json`, pack({
+      action: 'START_FRESH_PREVIEW', transactionId: t.id, timestamp: new Date().toISOString(), phase: t.phase, commit: t.commit, ...review,
+    }));
+  }
   async clear() { await this.write(`${ROOT}/active.json`, 'null'); }
   async removePending() {
     await this.vault.removeInternal(`${ROOT}/active.json`);

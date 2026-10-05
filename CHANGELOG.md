@@ -1,5 +1,11 @@
 # Stateful Git Sync changelog
 
+## 1.1.22 - Published Recovery with local changes
+
+- Resume reports the local path that differs from the reviewed transaction and retains the underlying explanation. Adoption scope changes report `.gitignore` separately.
+- A published transaction with local writes and a local mismatch offers **Start fresh Preview from current HEAD**. The explicit action verifies the transaction, current HEAD/Manifest/tree, retained recovery blobs and backup ref, retains current Local bytes and a read-back-verified audit, and clears only the pending pointer. Files, BASE, original journals and transaction phase stay unchanged; no success history is recorded.
+- Fresh Preview uses the existing planner and explicit conflict choices. Prepared transactions, replaced device/BASE/target/scope, diverged history, invalid manifests, missing backups and review races remain blocked. Recovery buttons refresh their own durable phase checkpoint after a failed Resume.
+
 ## 1.1.21 - Recovery and Preview loop
 
 - Pending Recovery no longer offers a Preview button after `RECOVERY_ENV_CHANGED`; the error explains that recovery or a safe Abort must finish first.
