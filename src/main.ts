@@ -1,7 +1,7 @@
 import { ActivityPanel } from './ui/ActivityPanel';
 import { activityIndicator } from './product/SyncActivity';
 import { Modal, Platform, Plugin, requestUrl, setIcon } from 'obsidian';
-import { PreviewError, safeError } from './errors';
+import { PreviewError, readWithTimeout, safeError } from './errors';
 import { SettingsTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS, loadSettings, type Settings } from './settings/settings';
 import { TokenStore, type Secrets } from './settings/TokenStore';
@@ -107,7 +107,12 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       this.productPending = this.productPending.then(() => this.product.dirty()).catch(error => { this.productError = error; this.refreshDashboard(); });
       this.auto.changed();
     };
-    this.registerEvent(this.app.vault.on('create', file => { if (identityPath(file.path)) track(() => this.syncState.recordCreate(file.path)); if (userPath(file.path)) dirty(); }));
+    // Obsidian announces every existing file as "create" during startup. Those
+    // events must not enqueue identity/cache writes or recreate deleted identities.
+    this.app.workspace.onLayoutReady(() => {
+      if (this.unloaded) return;
+      this.registerEvent(this.app.vault.on('create', file => { if (identityPath(file.path)) track(() => this.syncState.recordCreate(file.path)); if (userPath(file.path)) dirty(); }));
+    });
     this.registerEvent(this.app.vault.on('modify', file => { if (userPath(file.path)) dirty(); }));
     this.registerEvent(this.app.vault.on('delete', file => { if (identityPath(file.path)) track(() => this.syncState.recordDelete(file.path)); if (userPath(file.path)) dirty(); }));
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
@@ -197,13 +202,24 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     const settings = { ...this.settings };
     const settingsKey = JSON.stringify(settings);
     this.previewModal = new PreviewModal(this.app, options, async (progress, signal) => {
-      await this.metadataPending;
-      await this.productPending;
+      progress('Waiting for local file identity updates');
+      await readWithTimeout(() => this.metadataPending, 'LOCAL_STATE', signal,
+        'Local file identity updates did not finish within 30 seconds. Let Vault loading finish, then retry Preview. Pending updates are retained.');
+      progress('Waiting for local dashboard updates');
+      await readWithTimeout(() => this.productPending, 'OBSERVABILITY', signal,
+        'Local dashboard updates did not finish within 30 seconds. Check local storage and retry Preview.');
       if (this.stateError) throw this.stateError instanceof Error ? this.stateError : new Error(safeError(this.stateError));
       if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Reopen Preview to use the new target and ignore rules.');
       let result;
       try { result = await this.sync.preview(options, this.tokens.read(settings), progress, signal); }
-      catch (error) { await this.recordFailure(error); throw error; }
+      catch (error) {
+        if (!signal.aborted) {
+          progress('Saving Preview diagnostics');
+          // Diagnostics cannot leave a read failure hidden behind another stalled read.
+          try { await readWithTimeout(() => this.recordFailure(error), 'OBSERVABILITY', signal); } catch { /* Preserve the original Preview error. */ }
+        }
+        throw error;
+      }
       // Content is hashed twice by PreviewSnapshotReader; a delayed filesystem
       // notification for unchanged bytes must not invalidate a verified snapshot.
       if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed during Preview. Run Preview again.');

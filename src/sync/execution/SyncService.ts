@@ -1,5 +1,5 @@
 import type { ActivityStage, ActivitySnapshot } from '../../product/SyncActivity';
-import { assertActive, PreviewError, safeError } from '../../errors';
+import { assertActive, PreviewError, readWithTimeout, safeError } from '../../errors';
 import { GitHubWriter, MAX_SYNC_FILE_BYTES, type PublishEvent } from '../../github/GitHubWriter';
 import { RemoteManifestReader, MAX_MANIFEST_BYTES } from '../../github/RemoteManifestReader';
 import { RemoteTreeReader } from '../../github/RemoteTreeReader';
@@ -54,7 +54,9 @@ export class SyncService {
         this.stage(stage, processed, total);
       };
       const revision = this.observer?.revision ?? 0;
-      if (await this.transactions.active()) throw recoveryError();
+      progress('Checking pending recovery');
+      if (await readWithTimeout(() => this.transactions.active(), 'RECOVERY', signal,
+        'Pending recovery could not be read within 30 seconds. Check local storage and retry Preview. Recovery files are retained.')) throw recoveryError();
       const state = parseLocalState(this.state.current());
       if (state.baseManifest && (!state.target || !sameTarget(state.target, options))) throw fail('TARGET_MISMATCH', 'This device BASE belongs to another repository or branch. Use a separate Vault.');
       const capture = await new PreviewSnapshotReader(this.vault, this.transport, this.configDir).read(options, token, progress, signal, stage);

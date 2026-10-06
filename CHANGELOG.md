@@ -1,5 +1,11 @@
 # Stateful Git Sync changelog
 
+## 1.1.23 - Preview startup and bounded reads
+
+- Register new-file events after Obsidian's layout is ready. Existing files announced during Vault startup no longer enqueue identity/cache writes or falsely recreate deleted identities. Real post-startup create, rename and delete tracking remains intact.
+- Preview names local identity updates, dashboard updates and the pending-Recovery check before scanning. Those waits and GitHub GET requests now have a 30-second deadline and respond to cancellation; late read responses cannot resume a cancelled or timed-out caller.
+- A stalled read shows a stage-specific error with explicit Retry Preview. Pending metadata and Recovery files are retained; Preview does not write notes, publish GitHub changes or advance BASE. Publication and conflict-resolution rules are unchanged.
+
 ## 1.1.22 - Published Recovery with local changes
 
 - Resume reports the local path that differs from the reviewed transaction and retains the underlying explanation. Adoption scope changes report `.gitignore` separately.

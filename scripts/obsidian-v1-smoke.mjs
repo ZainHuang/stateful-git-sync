@@ -101,7 +101,10 @@ try {
   const localText = path => page.evaluate(path => app.vault.adapter.read(path), path);
   const state = () => page.evaluate(() => app.plugins.plugins['local-mirror-sync'].syncState.current());
 
-  if (process.argv.includes('--preview-ux')) {
+  if (process.argv.includes('--preview-startup')) {
+    const { verifyPreviewStartup } = await import('./preview-startup-ui-checks.mjs');
+    await verifyPreviewStartup({ page, remote, report, runDir, preview, close, surface, getUI: () => ui, state });
+  } else if (process.argv.includes('--preview-ux')) {
     const { verifyPreviewUX } = await import('./preview-ux-ui-checks.mjs');
     await verifyPreviewUX({ page, remote, report, runDir, preview, close, surface, getUI: () => ui, state });
   } else if (process.argv.includes('--empty-folders')) {

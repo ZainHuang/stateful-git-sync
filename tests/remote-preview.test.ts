@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { safeError } from '../src/errors';
 import { GitHubClient, validateTarget } from '../src/github/GitHubClient';
 import { RemoteTreeReader } from '../src/github/RemoteTreeReader';
@@ -9,6 +9,34 @@ import { TokenStore } from '../src/settings/TokenStore';
 import { bytes, HEAD, MemoryVault, referenceSha, remoteTransport, SUBTREE, target, TREE, treeEntries } from './helpers';
 
 const options = { ...DEFAULT_SETTINGS, ...target };
+
+describe('GitHub read deadlines', () => {
+  afterEach(() => vi.useRealTimers());
+  it('times out a stalled GET without exposing transport data or accepting its late response', async () => {
+    vi.useFakeTimers();
+    let finish!: (value: { status: number; json: unknown }) => void;
+    const transport = vi.fn(() => new Promise<{ status: number; json: unknown }>(resolve => { finish = resolve; }));
+    const outcome = vi.fn();
+    const pending = new GitHubClient(target, 'private-token', transport).get('ref/heads/main', 'REMOTE_REF')
+      .then(value => outcome(value), error => outcome(safeError(error)));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toHaveBeenCalledWith(expect.stringContaining('REMOTE_REF · NETWORK_TIMEOUT'));
+    expect(outcome.mock.calls.flat().join(' ')).not.toContain('private-token');
+    finish({ status: 200, json: { stale: true } }); await pending;
+    expect(outcome).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cancels a pending GET promptly even when requestUrl cannot abort the underlying request', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController(); const outcome = vi.fn();
+    const pending = new GitHubClient(target, '', () => new Promise(() => {})).get('ref/heads/main', 'REMOTE_REF', controller.signal)
+      .then(value => outcome(value), error => outcome(safeError(error)));
+    controller.abort(); await vi.advanceTimersByTimeAsync(0);
+    expect(outcome).toHaveBeenCalledWith(expect.stringContaining('CANCELLED'));
+    await pending; expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe('RemoteTreeReader', () => {
   it('reads ref, commit, recursive tree using GET only and pins HEAD', async () => {

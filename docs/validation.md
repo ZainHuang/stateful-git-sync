@@ -1,5 +1,14 @@
 # Stateful Git Sync validation
 
+## 1.1.23 - Preview startup and bounded reads (2026-10-06)
+
+- RED reproduced 200 metadata/cache writes for 100 existing-file startup announcements, missing local-wait progress, unbounded metadata and pending-Recovery reads, delayed Cancel, and stalled GitHub GETs. Seven assertions failed before implementation; 30 existing/follow-up assertions passed. The RED log is retained in the ignored `test-results/tdd/preview-startup-red.log`.
+- GREEN: `npm run check` passed TypeScript, standard and Obsidian lint, all 759 tests across 37 files (including the seeded property suite), and the mobile-safe build. Final 1.1.23 metadata passed all five branding/upgrade compatibility tests and was rebuilt. Initial test-fixture type and timer/rejection lint diagnostics were corrected without suppressing rules or changing dependencies.
+- The isolated real Obsidian startup/timeout suite passed five checks with zero Console errors. At 390px, local-wait text and Cancel are visible without horizontal overflow; cancellation starts no GitHub read or BASE update. Local and GitHub stalls report their 30-second deadlines, late read results cannot produce a plan, explicit retry works, and real post-startup create events remain observed. Its fixture recorded nine GETs, zero POSTs and zero PATCHes.
+- The final 1.1.23 V1 Obsidian regression passed all 13 checks with zero Console errors, including Push/Pull, mobile rename/conflict/delete, Bootstrap, lost-PATCH Recovery, standalone read-only Verify, both explicit Legacy Adoption choices and Empty filtering. No branch update used `force:true`. All application checks used generated isolated Vaults.
+- The installation candidate ZIP contains exactly `main.js`, `manifest.json` and `styles.css` inside the compatible `local-mirror-sync` directory; archive read-back SHA-256 matches each built asset. Physical Android installation and the user's exact stall remain unverified; no live note repository or daily Vault was changed by this task.
+- The public candidate audit included the two new test/smoke files: 148 source files and both bundles, with zero findings. Final diff review found only this fix, its tests, candidate metadata and implementation/validation records.
+
 ## 1.1.22 - Published Recovery with local changes (2026-10-06)
 
 - RED reproduced the hidden affected path and missing fresh-Preview action for interrupted published PULL/Bootstrap transactions. The old real Obsidian bundle also failed because `LOCAL_CHANGED` omitted `note.md`. An earlier UI fixture interception failed before the target interaction and is retained separately as setup evidence, not counted as RED.

@@ -1,4 +1,4 @@
-import { assertActive, PreviewError } from '../errors';
+import { assertActive, PreviewError, readWithTimeout } from '../errors';
 import type { GetTransport, RepositoryTarget } from './types';
 
 function hasForbiddenBranchCharacter(value: string): boolean {
@@ -44,7 +44,7 @@ export class GitHubClient {
     if (resource.startsWith('ref/')) headers['Cache-Control'] = 'no-cache, no-store';
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     try {
-      const response = await this.transport({ url: this.base + resource, method: 'GET', headers, throw: false });
+      const response = await readWithTimeout(() => this.transport({ url: this.base + resource, method: 'GET', headers, throw: false }), stage, signal);
       assertActive(signal);
       if (response.status !== 200) {
         const hints: Record<number, string> = {
@@ -58,6 +58,9 @@ export class GitHubClient {
       }
       return response.json;
     } catch (error) {
+      if (error instanceof PreviewError && error.code === 'READ_TIMEOUT') {
+        throw new PreviewError(stage, 'NETWORK_TIMEOUT', 'GitHub did not respond within 30 seconds. Check your connection and retry Preview.');
+      }
       if (error instanceof PreviewError) throw error;
       throw new PreviewError(stage, 'NETWORK_ERROR', 'GitHub could not be read. Check your connection and retry Preview.');
     }
