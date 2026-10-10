@@ -9,6 +9,7 @@ import type { SyncDecision } from '../sync/planner/SyncDecision';
 import type { LocalSyncState } from '../sync/state/LocalSyncState';
 import { gitBlobSha } from '../vault/HashService';
 import type { AutoStatus } from './AutoSyncController';
+import type { VerificationLevel } from './SyncPerformance';
 
 export interface ProductStorage { read(path: string): Promise<string | null>; write(path: string, contents: string): Promise<void> }
 export interface DeviceInfo { deviceId: string; deviceName: string; deviceType: string; lastSyncAt?: string; lastGeneration?: number }
@@ -16,12 +17,14 @@ interface Counts { addCount: number; updateCount: number; deleteCount: number; r
 export interface Observation extends Counts { timestamp: string; device: DeviceInfo }
 export interface HistoryRecord extends Counts {
   transactionId: string; timestamp: string; deviceId: string; generationBefore: number; generationAfter: number; commitSha: string; verifyResult: 'PASS';
+  verification?: VerificationLevel;
 }
 export type Health = 'Healthy' | 'Sync Required' | 'Conflict' | 'Recovery Required' | 'Offline';
 export interface ProductCache {
   currentDevice: DeviceInfo; devices: DeviceInfo[]; targetKey?: string; status: Health;
   localFiles?: number; remoteFiles?: number; lastCheckAt?: string; lastVerifiedAt?: string; lastChangeAt?: string;
   auto: AutoStatus; warning?: string;
+  lastVerification?: VerificationLevel;
 }
 export interface SyncObserver {
   readonly revision: number;
@@ -88,7 +91,13 @@ export class ProductStore implements SyncObserver {
       if (event.transactionId) this.live.transactionId = event.transactionId;
       if (event.generation !== undefined) this.live.generation = event.generation;
       if (event.stage === 'Complete') this.live.verified = true;
-    } else { this.live.running = false; this.live.endedAt = Date.now(); this.live.error = event.error; if (event.error) this.live.verified = false; }
+    } else {
+      this.live.running = false; this.live.endedAt = Date.now(); this.live.error = event.error;
+      this.live.performance = event.performance; this.live.verification = event.performance?.verification; this.live.pendingChanges = event.pendingChanges;
+      if (event.error) this.live.verified = false;
+      else if (event.performance?.verification && this.cache.status === 'Healthy') this.live.verified = true;
+      if (event.pendingChanges && this.cache.status === 'Healthy') this.cache.status = 'Sync Required';
+    }
     this.changed();
   }
   cachedHistory(): HistoryRecord[] { return structuredClone(this.records); }
@@ -99,6 +108,7 @@ export class ProductStore implements SyncObserver {
   }
   async dirty(): Promise<void> {
     this.revision++; this.cache.lastChangeAt = new Date().toISOString();
+    if (!this.live.running) { this.live.verified = false; this.live.pendingChanges = true; }
     if (!['Conflict', 'Recovery Required'].includes(this.cache.status)) this.cache.status = 'Sync Required';
     await this.persist();
   }
@@ -157,14 +167,17 @@ export class ProductStore implements SyncObserver {
     const observation = t.observation ?? { timestamp: new Date().toISOString(), ...changeCounts([]), device: this.cache.currentDevice };
     const record: HistoryRecord = { transactionId: t.id, timestamp: observation.timestamp, deviceId: t.originalState.deviceId,
       generationBefore: t.originalState.baseManifest?.generation ?? 0, generationAfter: t.manifest.generation, commitSha: t.commit,
-      addCount: observation.addCount, updateCount: observation.updateCount, deleteCount: observation.deleteCount, renameCount: observation.renameCount, verifyResult: 'PASS' };
+      addCount: observation.addCount, updateCount: observation.updateCount, deleteCount: observation.deleteCount, renameCount: observation.renameCount, verifyResult: 'PASS', ...(t.verification ? { verification: t.verification } : {}) };
     if (t.observation) {
+      const report = t.observation.device;
+      this.peerBlobs.set(gitBlobSha(new TextEncoder().encode(JSON.stringify(report))), report);
       await this.appendHistory(record);
       this.records = [record, ...this.records.filter(r => r.transactionId !== record.transactionId)].slice(0, 100);
     } else this.cache.warning = 'Recovered a V1.0 transaction. Its original operation counts were not recorded; no historical counts were invented.';
     this.cache.currentDevice = { ...this.cache.currentDevice, deviceId: t.originalState.deviceId, lastSyncAt: record.timestamp, lastGeneration: record.generationAfter };
     this.mergeDevices([this.cache.currentDevice]); this.cache.targetKey = targetKey(t.options);
     this.cache.status = 'Healthy'; this.cache.lastVerifiedAt = record.timestamp; this.cache.lastCheckAt = new Date().toISOString();
+    this.cache.lastVerification = t.verification;
     this.cache.localFiles = Object.keys(t.after).length; this.cache.remoteFiles = Object.keys(t.after).length;
     await this.persist();
   }

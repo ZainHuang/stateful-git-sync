@@ -110,7 +110,10 @@ export async function verifyV111({ page, remote, report, runDir, preview, sync, 
     await plugin.metadataPending; await plugin.syncState.save(original);
     const transport = plugin.sync.transport; window.__v111BeforeAdoptionTransport = transport; let published = false;
     plugin.sync.transport = async req => {
-      if (published && req.method === 'GET' && req.url.includes('/git/commits/')) {
+      // Immutable Commit reads can now be reused after pre-publication proof.
+      // Fail a mandatory fresh HEAD check once the durable phase is published.
+      if (published && req.method === 'GET' && req.url.endsWith('/ref/heads/main')
+        && (await plugin.sync.transactions.active())?.phase === 'published') {
         published = false; return { status: 503, json: {} };
       }
       const response = await transport(req);

@@ -21,7 +21,7 @@ async function setup() {
 }
 afterEach(() => vi.useRealTimers());
 describe('Real sync activity projection', () => {
-  it('projects required states and safe routes without IO; verified fades without advancing lifecycle', async () => {
+  it('projects business phases and safe routes without IO; Verified remains static', async () => {
     const a = await setup(); const cache = a.product.snapshot(); const idle = a.product.activitySnapshot();
     expect(activityIndicator({ ...cache, status: 'Healthy' }, idle).label).toBe('Healthy');
     expect(activityIndicator({ ...cache, lastChangeAt: new Date().toISOString() }, idle).label).toBe('Local changes');
@@ -30,12 +30,12 @@ describe('Real sync activity projection', () => {
       expect(activityIndicator({ ...cache, status }, idle)).toMatchObject({ label: expect.stringContaining('Review required'), destination: status === 'Conflict' ? 'preview' : 'recovery' });
     }
     expect(activityIndicator({ ...cache, auto: { result: 'Manual confirmation required' } }, idle).destination).toBe('preview');
-    expect(activityIndicator(cache, { ...idle, running: true, operation: 'preview' }).label).toBe('Previewing');
-    expect(activityIndicator(cache, { ...idle, running: true, stage: 'Publish' }).label).toBe('Syncing');
-    expect(activityIndicator(cache, { ...idle, running: true, stage: 'Verify local' }).label).toBe('Verifying');
+    expect(activityIndicator(cache, { ...idle, running: true, operation: 'preview' }).label).toBe('检查差异');
+    expect(activityIndicator(cache, { ...idle, running: true, stage: 'Publish' }).label).toBe('同步文件');
+    expect(activityIndicator(cache, { ...idle, running: true, stage: 'Verify local' }).label).toBe('安全校验');
     expect(activityIndicator(cache, { ...idle, error: 'safe failure' }).label).toBe('Error');
-    expect(activityIndicator({ ...cache, status: 'Healthy' }, { ...idle, verified: true, endedAt: 100 }, 200).label).toBe('Synced & verified');
-    expect(activityIndicator({ ...cache, status: 'Healthy' }, { ...idle, verified: true, endedAt: 100 }, 5000).label).toBe('Healthy');
+    expect(activityIndicator({ ...cache, status: 'Healthy' }, { ...idle, verified: true, endedAt: 100 }, 200).label).toBe('Verified');
+    expect(activityIndicator({ ...cache, status: 'Healthy' }, { ...idle, verified: true, endedAt: 100 }, 5000).label).toBe('Verified');
     expect(a.remote.calls).toEqual([]);
   });
   it.each(['manual', 'auto'])('%s exposes real stages, file counts and completion only after pointer clear', async mode => {

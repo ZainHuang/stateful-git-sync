@@ -3,6 +3,7 @@ import { assertPath, pathOrder } from '../vault/paths';
 import type { Progress } from '../vault/VaultScanner';
 import { GitHubClient } from './GitHubClient';
 import type { RemoteEntry, RemoteSnapshot } from './types';
+import type { RemoteMetadataCache } from './RemoteMetadataCache';
 
 const SHA = /^[0-9a-f]{40}$/;
 const invalid = () => new PreviewError('REMOTE_TREE', 'INVALID_RESPONSE', 'GitHub returned an incomplete or inconsistent response. No plan was created.');
@@ -34,7 +35,7 @@ function tree(value: unknown, expected: string, shallow = false): { entries: Rem
 }
 
 export class RemoteTreeReader {
-  constructor(private readonly client: GitHubClient) {}
+  constructor(private readonly client: GitHubClient, private readonly cache?: RemoteMetadataCache) {}
 
   async read(branch: string, progress: Progress = () => {}, signal?: AbortSignal): Promise<RemoteSnapshot> {
     progress('Reading GitHub branch HEAD');
@@ -48,6 +49,9 @@ export class RemoteTreeReader {
 
   async readCommit(remoteHeadSha: string, progress: Progress = () => {}, signal?: AbortSignal): Promise<RemoteSnapshot> {
     sha(remoteHeadSha);
+    assertActive(signal);
+    const cached = this.cache?.get(remoteHeadSha);
+    if (cached) return cached.snapshot;
     const commit = obj(await this.client.get(`commits/${remoteHeadSha}`, 'REMOTE_COMMIT', signal));
     if (sha(commit.sha) !== remoteHeadSha) throw invalid();
     const treeSha = sha(obj(commit.tree).sha);

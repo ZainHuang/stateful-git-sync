@@ -104,7 +104,8 @@ try {
   await page.setViewportSize({ width: 1200, height: 900 });
   await page.evaluate(payload => window.__lmsTest.open(payload, 'loading'), payload);
   await page.getByRole('button', { name: 'Cancel', exact: true }).waitFor();
-  assert(await page.locator('.lms-status').isVisible());
+  assert.deepEqual(await page.locator('.lms-business-stages li').allTextContents(), ['检查差异', '同步文件', '安全校验']);
+  assert.equal(await page.locator('.lms-technical-details').getAttribute('open'), null);
   await screenshot('stateful-loading.png');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await page.locator('.lms-modal').count(), 0);

@@ -12,6 +12,9 @@ import { PreviewSnapshotReader } from '../PreviewSnapshotReader';
 import type { LocalStateStore } from '../state/LocalStateStore';
 import type { SyncVault } from './SyncVault';
 import { sameTransactionTarget as sameTarget, type SyncTransaction, type TransactionStore } from './TransactionStore';
+import type { ActivityStage } from '../../product/SyncActivity';
+import type { SyncPerformance } from '../../product/SyncPerformance';
+import type { LocalChangeIndex } from '../../vault/LocalChangeIndex';
 
 // V1.0 has neither observability nor creation metadata. Never widen the normal
 // V1.1 recovery path, or infer that a prepared candidate was already published.
@@ -37,7 +40,11 @@ function verifyMap(expected: Record<string, string>, actual: Record<string, stri
 export async function recoverLegacyPublished(t: SyncTransaction, options: PreviewOptions, token: string,
   vault: SyncVault, transport: GitTransport, configDir: string, state: LocalStateStore,
   transactions: TransactionStore, progress: Progress, active: () => void, observer?: SyncObserver,
-  intent: 'resume' | 'fresh-preview' = 'resume'): Promise<void> {
+  intent: 'resume' | 'fresh-preview' = 'resume', verification: { measurement?: SyncPerformance; index?: LocalChangeIndex } = {}): Promise<void> {
+  const { measurement, index } = verification;
+  const stage = (stage: ActivityStage, processed?: number, total?: number, generation?: number) => {
+    measurement?.stage(stage); observer?.activity?.({ type: 'stage', stage, processed, total, generation });
+  };
   if (!sameTarget(options, t.options)) throw fail('LEGACY_TARGET_MISMATCH', 'Current repository/branch differs from the legacy transaction.');
   const previous = state.current(); const stateKey = JSON.stringify(previous);
   const sameBase = (base: typeof previous) => JSON.stringify(previous.baseManifest) === JSON.stringify(base.baseManifest) && previous.baseRemoteCommit === base.baseRemoteCommit;
@@ -45,8 +52,8 @@ export async function recoverLegacyPublished(t: SyncTransaction, options: Previe
   if (rules.configDir !== configDir || options.includeObsidian !== t.options.includeObsidian || options.ignorePatterns !== t.options.ignorePatterns) {
     throw fail('LEGACY_SCOPE_CHANGED', 'Configuration directory or ignore settings differ from the reviewed legacy scope.');
   }
-  const github = new GitHubWriter(options, token, transport);
-  observer?.activity?.({ type: 'stage', stage: 'Verify remote' });
+  const github = new GitHubWriter(options, token, transport, measurement);
+  stage('Verify remote');
   progress('Checking legacy published commit ancestry and retained backup…');
   const head = await github.head();
   const advanced = head !== t.commit;
@@ -67,13 +74,13 @@ export async function recoverLegacyPublished(t: SyncTransaction, options: Previe
     if (JSON.stringify(state.current()) !== stateKey) throw fail('LEGACY_STATE_CHANGED', 'Current device state changed during verification.');
   };
   await verifyHead(); await verifyBackup();
-  const capture = await new PreviewSnapshotReader(vault, transport, configDir).read(options, token, progress, undefined, (stage, processed, total) => observer?.activity?.({ type: 'stage', stage, processed, total })).catch(error => {
+  const capture = await new PreviewSnapshotReader(vault, transport, configDir, measurement, index, undefined, true).read(options, token, progress, undefined, stage).catch(error => {
     if (error instanceof PreviewError && error.code === 'LOCAL_CHANGED') throw fail('LEGACY_LOCAL_MISMATCH', 'Local bytes changed during scanning.');
     throw error;
   });
   assertHead(capture.remote.remoteHeadSha);
-  observer?.activity?.({ type: 'stage', stage: 'Verify remote' });
-  const manifest = await new RemoteManifestReader(capture.client).read(capture.remote);
+  stage('Verify remote');
+  const manifest = await new RemoteManifestReader(capture.client, measurement).read(capture.remote);
   if (!manifest) throw fail('LEGACY_MANIFEST_MISSING', 'Current remote tree has no sync Manifest.');
   if (!advanced && JSON.stringify(manifest) !== JSON.stringify(t.manifest)) throw fail('LEGACY_MANIFEST_MISMATCH', `Remote Manifest identities/revisions or generation ${manifest.generation} differ from transaction generation ${t.manifest.generation}.`);
   if (advanced) validateManifestHistory(t.manifest, manifest);
@@ -87,7 +94,7 @@ export async function recoverLegacyPublished(t: SyncTransaction, options: Previe
     if (!await github.contains(previous.baseRemoteCommit, head)) throw fail('LEGACY_RECOVERY_DIVERGED',
       `Current HEAD ${head} does not descend from the saved recovery BASE ${previous.baseRemoteCommit}.`);
     const baseSnapshot = await new RemoteTreeReader(github.reader).readCommit(previous.baseRemoteCommit);
-    verifiedCheckpoint = JSON.stringify(previous.baseManifest) === JSON.stringify(await new RemoteManifestReader(github.reader).read(baseSnapshot));
+    verifiedCheckpoint = JSON.stringify(previous.baseManifest) === JSON.stringify(await new RemoteManifestReader(github.reader, measurement).read(baseSnapshot));
   }
   if (previous.target && !sameTarget(previous.target, t.options)
     || previous.baseManifest && !alreadyVerified && !verifiedCurrent && !verifiedCheckpoint
@@ -129,7 +136,7 @@ export async function recoverLegacyPublished(t: SyncTransaction, options: Previe
     throw fail('LEGACY_REMOTE_TREE_MISMATCH', `Remote size differs from verified local bytes at ${file.path}.`);
   }
   const verifyLocal = async () => {
-    observer?.activity?.({ type: 'stage', stage: 'Verify local' });
+    stage('Verify local');
     try { await capture.verify(); }
     catch (error) {
       if (error instanceof PreviewError && error.code === 'LOCAL_CHANGED') throw fail('LEGACY_LOCAL_MISMATCH', 'Local bytes or ignore rules changed during final verification.');
@@ -155,16 +162,17 @@ export async function recoverLegacyPublished(t: SyncTransaction, options: Previe
   }
   // Preserve the current device identity. The old device ID is journal evidence,
   // not a prerequisite for rebuilding this device's missing BASE from proof.
-  observer?.activity?.({ type: 'stage', stage: 'Save BASE', generation: manifest.generation });
+  measurement?.verification('Full Integrity Verified');
+  stage('Save BASE', undefined, undefined, manifest.generation);
   await state.save({ schemaVersion: 1, deviceId: previous.deviceId, target: { owner: options.owner, repository: options.repository, branch: options.branch },
     baseManifest: manifest, baseRemoteCommit: head, lastSeenGeneration: manifest.generation,
     lastSuccessfulSyncAt: new Date().toISOString(), localFiles: { ...manifest.files },
     syncScope: JSON.stringify({ configDir, includeObsidian: options.includeObsidian, patterns: options.ignorePatterns, gitignore: capture.gitignore }) });
   // Mark completion only after BASE read-back and observability succeed.
   // Interrupted metadata checkpoints repeat the same read-only proof.
-  await observer?.verified({ ...t, commit: head, manifest, after: expected, originalState: { ...t.originalState, deviceId: previous.deviceId } });
-  observer?.activity?.({ type: 'stage', stage: 'Finalize transaction' });
+  await observer?.verified({ ...t, commit: head, manifest, after: expected, verification: 'Full Integrity Verified', originalState: { ...t.originalState, deviceId: previous.deviceId } });
+  stage('Finalize transaction');
   t.phase = 'complete'; await transactions.save(t); await transactions.clear();
-  observer?.activity?.({ type: 'stage', stage: 'Complete' });
+  stage('Complete');
   progress(`${advanced ? 'RECOVER_TO_CURRENT_HEAD' : 'Verified legacy transaction'} · BASE generation ${manifest.generation} · ${head}`);
 }

@@ -33,6 +33,16 @@ Stateful Git Sync 通过 GitHub 同步多台设备的 Obsidian 笔记与附件�
 
 [下载安装包](https://github.com/ZainHuang/stateful-git-sync/releases/latest) · [报告问题](https://github.com/ZainHuang/stateful-git-sync/issues) · [升级兼容说明](docs/compatibility.md) · [安全说明](SECURITY.md) · [English](README.md)
 
+## V1.2：增量同步与智能验证
+
+日常同步优先读取发生新增、修改、删除或重命名的文件，复用已验证文件的 Hash。每次仍核对完整文件清单和必要的文件元数据，并轮换读取最多 8 个未变化文件作内容审计。远端 HEAD 每次重新查询；HEAD 对应的 Commit、Tree 和 Manifest 已验证时可复用其可信元数据。
+
+**Incremental Verified** 表示本轮严格验证了变化范围、删除/重命名结果、远端快照和 BASE，未变化文件使用可信索引。**Full Integrity Verified** 表示本轮还完成了范围内所有文件的内容 Hash 核验。插件重启、移动端恢复前台、索引损坏、未观察到的文件清单/元数据变化、Ignore 范围变化，以及超过 24 小时或达到第 20 次同步时，会完整对账；初始化和涉及本地写入的 Recovery 也使用全量验证。独立 **Verify Sync (read-only)** 始终进行全量内容审计。
+
+同步状态默认只显示 **检查差异 → 同步文件 → 安全校验**。展开「技术详情」可查看实际技术阶段、文件计数、耗时、读取/Hash 字节数和 API 请求统计。完成后保留静态 **Verified**；冲突或中断会直接提供处理入口。已发布且没有本地写入的 Recovery 继续保留后续编辑，完成证明标为 **Published Snapshot Verified**，后续变更进入下一次 Preview。
+
+`local-change-index.json` 只是派生缓存，保存在原插件目录，损坏或删除后会重建。升级仍只替换安装文件，保留原有 BASE、设备身份和 Recovery。性能数据与真机验证边界见 [验证记录](docs/validation.md)。
+
 ## What it is · 它是什么
 
 Stateful Git Sync 是 Obsidian 插件，支持桌面和移动端运行。每台设备保留自己的同步历史，通过同一个 GitHub 仓库交换笔记、附件和文件身份信息。不需要在手机安装 Git、Node.js 或运行服务器。

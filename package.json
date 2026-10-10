@@ -1,6 +1,6 @@
 {
   "name": "stateful-git-sync",
-  "version": "1.1.23",
+  "version": "1.2.0",
   "private": true,
   "description": "Synchronize vaults across devices via GitHub using verified baselines, file identities and deletion records, with explicit conflict review and recovery.",
   "type": "module",
@@ -32,6 +32,8 @@
     "test:obsidian:empty-folders": "node scripts/obsidian-v1-smoke.mjs --empty-folders",
     "test:obsidian:preview-ux": "node scripts/obsidian-v1-smoke.mjs --preview-ux",
     "test:obsidian:preview-startup": "node scripts/obsidian-v1-smoke.mjs --preview-startup",
+    "test:obsidian:v12": "node scripts/obsidian-v1-smoke.mjs --v12",
+    "test:performance:v12": "node scripts/v12-performance.mjs",
     "audit:public": "node scripts/audit-public.mjs"
   },
   "dependencies": {

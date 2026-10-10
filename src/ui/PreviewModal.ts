@@ -11,6 +11,8 @@ import type { Progress } from '../vault/VaultScanner';
 import type { StatefulPreviewResult } from '../sync/StatefulPreviewService';
 import type { SyncPreview } from '../sync/execution/SyncService';
 import type { Resolution } from '../sync/execution/ExecutionPlan';
+import type { ActivitySnapshot } from '../product/SyncActivity';
+import { SyncProgressView } from './SyncProgressView';
 
 type RunPreview = (progress: Progress, signal: AbortSignal) => Promise<StatefulPreviewResult>;
 const PAGE_SIZE = 10;
@@ -38,9 +40,11 @@ export class PreviewModal extends Modal {
   private fileModal?: FileDetailsModal;
   private confirmationModal?: SyncConfirmationModal;
   private choiceNotice?: string;
+  private flow?: SyncProgressView;
 
   constructor(app: App, private readonly target: RepositoryTarget & { deleteSafetyThreshold?: number }, private readonly run: RunPreview, private readonly actions?: SyncActions,
-    private readonly recover?: (action?: RecoveryAction) => void) { super(app); }
+    private readonly recover?: (action?: RecoveryAction) => void, private readonly activity?: () => ActivitySnapshot) { super(app); }
+  renderActivity(): void { if (this.activity) this.flow?.render(this.activity()); }
 
   onOpen(): void {
     this.modalEl.addClass('lms-modal', 'lms-preview-modal');
@@ -60,7 +64,8 @@ export class PreviewModal extends Modal {
   private header(): void {
     const el = this.contentEl;
     el.empty();
-    el.createEl('p', { text: this.actions ? 'V1.1 · Stateful Three-Way Sync' : 'Stateful Three-Way Sync · Preview only', cls: 'lms-subtitle' });
+    this.flow = undefined;
+    el.createEl('p', { text: this.actions ? 'V1.2 · Stateful Three-Way Sync' : 'Stateful Three-Way Sync · Preview only', cls: 'lms-subtitle' });
     const info = el.createEl('dl', { cls: 'lms-meta' });
     for (const [label, value] of [['Remote', `${this.target.owner}/${this.target.repository}`], ['Branch', this.target.branch]]) {
       info.createEl('dt', { text: label });
@@ -79,12 +84,11 @@ export class PreviewModal extends Modal {
     this.result = undefined;
     this.filter = 'ALL'; this.query = ''; this.page = 0;
     this.header();
-    const status = this.contentEl.createEl('p', { text: 'Preparing Preview…', cls: 'lms-status', attr: { role: 'status', 'aria-live': 'polite' } });
-    this.contentEl.createEl('p', { text: 'Reading file bytes and GitHub metadata. No files are changed.', cls: 'lms-muted' });
+    this.flow = new SyncProgressView(this.contentEl); this.flow.setMessage('Preparing Preview…'); this.renderActivity();
     const cancel = this.contentEl.createEl('button', { text: 'Cancel' });
     cancel.onclick = () => this.close();
     try {
-      const result = await this.run(message => { if (!controller.signal.aborted) status.setText(message); }, controller.signal);
+      const result = await this.run(message => { if (!controller.signal.aborted) { this.flow?.setMessage(message); this.renderActivity(); } }, controller.signal);
       if (controller.signal.aborted) return;
       this.plan = result.plan;
       this.renderPlan(result);
@@ -210,11 +214,12 @@ export class PreviewModal extends Modal {
         if (this.executing || execute.disabled || !canExecutePreview(prepared) || this.result !== prepared || this.controller?.signal.aborted) return;
         this.executing = true;
         this.contentEl.querySelectorAll('button, input').forEach(e => { (e as HTMLButtonElement).disabled = true; });
-        const status = el.createEl('p', { text: 'Rechecking Preview…', cls: 'lms-status', attr: { role: 'status', 'aria-live': 'polite' } });
+        this.header(); this.flow = new SyncProgressView(el); this.flow.setMessage('Rechecking Preview…'); this.renderActivity();
         try {
-          await this.actions!.execute(prepared, text => status.setText(text), this.controller!.signal, confirmation);
+          await this.actions!.execute(prepared, text => { this.flow?.setMessage(text); this.renderActivity(); }, this.controller!.signal, confirmation);
           this.header();
           this.contentEl.createEl('p', { text: 'Sync verified. BASE updated successfully.', cls: 'lms-status' });
+          this.flow = new SyncProgressView(this.contentEl); this.renderActivity();
           this.contentEl.createEl('button', { text: 'Preview again' }).onclick = () => { void this.load(); };
         } catch (error) {
           this.header();

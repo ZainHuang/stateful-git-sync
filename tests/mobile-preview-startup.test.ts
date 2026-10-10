@@ -9,7 +9,7 @@ vi.mock('obsidian', () => {
   class Plugin {
     constructor(public app: unknown) {}
     loadData() { return Promise.resolve(target); }
-    registerEvent() {} registerView() {} addSettingTab() {} addCommand() {}
+    registerEvent() {} registerView() {} registerDomEvent() {} addSettingTab() {} addCommand() {}
     addRibbonIcon() { return { addClass() {}, setAttribute() {} }; }
   }
   return { Plugin, Modal: class {}, ItemView: class {}, PluginSettingTab: class {}, Setting: class {}, Notice: class {}, TFile: class {},
@@ -31,6 +31,7 @@ type PendingPlugin = { metadataPending: Promise<unknown>; productPending: Promis
 } };
 async function setup() {
   vi.stubGlobal('window', globalThis);
+  vi.stubGlobal('document', { hidden: false });
   const disk = new Map<string, string>(); const listeners = new Map<string, (file: { path: string }, oldPath?: string) => void>();
   const ready: (() => void)[] = [];
   const write = vi.fn(async (path: string, contents: string) => { disk.set(path, contents); });

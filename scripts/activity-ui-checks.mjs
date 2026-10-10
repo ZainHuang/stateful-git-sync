@@ -15,44 +15,67 @@ export async function verifyActivity({ page, remote, report, runDir, preview, cl
     p.sync.transport = async r => {
       // The first GET after PATCH now belongs to publication read-back. Hold
       // immutable commit verification, where Verify remote has actually begun.
-      const resource = r.method === 'PATCH' ? 'publish' : window.__activityPublished && r.method === 'GET' && r.url.includes('/commits/') ? 'verify' : null;
+      const resource = r.method === 'PATCH' ? 'publish' : null;
       if (resource && !window[`__released_${resource}`]) {
         window.__activityGate = resource;
         await new Promise(resolve => { window.__releaseActivity = () => { window[`__released_${resource}`] = true; resolve(); }; });
       }
       const result = await transport(r); if (r.method === 'PATCH') window.__activityPublished = true; return result;
     };
+    const vault = p.sync.vault; const read = vault.readBinary;
+    vault.readBinary = async path => {
+      if (p.product.activitySnapshot().stage === 'Verify local' && !window.__released_verify) {
+        window.__activityGate = 'verify'; await new Promise(resolve => { window.__releaseActivity = () => { window.__released_verify = true; resolve(); }; });
+      }
+      return read(path);
+    };
   });
   await getUI().getByRole('button', { name: 'Sync & Verify', exact: true }).click();
   await page.waitForFunction(() => window.__activityGate === 'publish');
-  assert.match(await page.locator('.lms-activity-entry').innerText(), /Syncing/);
+  assert.match(await page.locator('.lms-activity-entry').innerText(), /同步文件/);
   // Closing Preview must not cancel a journaled transaction; inspect the global entry.
   await close(); await page.locator('.lms-activity-entry').click(); await surface('.lms-activity-panel');
-  await getUI().locator('.lms-activity-current').getByText('Publish', { exact: true }).waitFor();
+  await getUI().locator('.lms-activity-current').getByText('同步文件', { exact: true }).waitFor();
+  assert.deepEqual(await getUI().locator('.lms-business-stages li').allTextContents(), ['检查差异', '同步文件', '安全校验']);
+  assert.equal(await getUI().locator('.lms-technical-details').getAttribute('open'), null);
+  await getUI().locator('.lms-technical-details summary').click();
+  await getUI().locator('.lms-technical-current').getByText('Publish', { exact: true }).waitFor();
   await shot('activity-syncing');
   const calls = remote.calls.length;
+  const timer = () => getUI().locator('.lms-activity-steps li[data-state="In progress"] .lms-muted').innerText();
+  const heldElapsed = Number.parseFloat((await timer()).split('·').at(-1));
   await getUI().waitForTimeout(1200);
   assert.equal(remote.calls.length, calls);
-  assert.equal(await getUI().locator('.lms-activity-current').getByText('Publish', { exact: true }).count(), 1);
+  assert.equal(await getUI().locator('.lms-technical-current').getByText('Publish', { exact: true }).count(), 1);
+  assert(Number.parseFloat((await timer()).split('·').at(-1)) > heldElapsed, 'Observed stage time must advance while Publish is held');
   await page.evaluate(() => window.__releaseActivity());
   await page.waitForFunction(() => window.__activityGate === 'verify');
-  assert.match(await page.locator('.lms-activity-entry').innerText(), /Verifying/);
-  await getUI().locator('.lms-activity-current').getByText('Verify remote', { exact: true }).waitFor();
+  assert.match(await page.locator('.lms-activity-entry').innerText(), /安全校验/);
+  await getUI().locator('.lms-technical-current').getByText('Verify local', { exact: true }).waitFor();
   await shot('activity-verifying');
   await page.evaluate(() => window.__releaseActivity());
-  await getUI().getByText('Synced & verified', { exact: true }).first().waitFor();
+  await getUI().getByText('Verified', { exact: true }).first().waitFor();
   for (const stage of ['Scan local', 'Read remote', 'Build plan', 'Upload blobs', 'Create tree', 'Create commit', 'Publish', 'Verify remote', 'Verify local', 'Save BASE', 'Complete']) assert.equal(await getUI().locator('.lms-activity-steps').getByText(stage, { exact: true }).count(), 1);
   await shot('activity-complete');
-  await page.locator('.lms-activity-entry').getByText('Healthy', { exact: true }).waitFor();
+  await page.locator('.lms-activity-entry').getByText('Verified', { exact: true }).waitFor();
   const doneCalls = remote.calls.length;
   await getUI().setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { document.body.classList.add('emulate-mobile'); app.workspace.leftSplit.collapse(); app.workspace.rightSplit.collapse(); });
   assert(await getUI().locator('.lms-activity-panel').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   await shot('activity-mobile');
   assert.equal(remote.calls.length, doneCalls);
-  report.checks.push('Real Publish/Verify holds show distinct animated statuses; open panel uses zero requests; complete trace, verified-to-Healthy and 390px overflow pass');
+  report.checks.push('Three business stages share real Publish/Verify events; technical details default closed; complete trace, static Verified and 390px overflow pass');
   await page.evaluate(() => { app.plugins.plugins['local-mirror-sync'].activityPanel.close(); document.body.classList.remove('emulate-mobile'); });
   await page.setViewportSize({ width: 1200, height: 900 });
+  await page.evaluate(async () => { await app.vault.modify(app.vault.getAbstractFileByPath('note.md'), '# Edit after Verified'); });
+  await page.waitForFunction(() => app.plugins.plugins['local-mirror-sync'].product.activitySnapshot().pendingChanges === true);
+  await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openActivityPanel()); await surface('.lms-activity-panel');
+  await getUI().locator('.lms-activity-current').getByText('有新的本地变更', { exact: true }).waitFor();
+  assert.equal(await getUI().locator('.lms-activity-current').getByText('Verified', { exact: true }).count(), 0);
+  assert.equal(await getUI().locator('.lms-business-stages li[data-state="pending"]').count(), 3);
+  assert.match(await getUI().locator('.lms-verification-level').innerText(), /^上次校验：/);
+  await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].activityPanel.close());
+  report.checks.push('Editing after completion clears the shared static Verified badge and exposes pending changes in Activity');
   await page.evaluate(async () => {
     const p = app.plugins.plugins['local-mirror-sync'];
     await p.saveSettings({ ...p.settings, autoSync: true, autoSyncDebounceSeconds: 3 });
@@ -62,11 +85,11 @@ export async function verifyActivity({ page, remote, report, runDir, preview, cl
   await page.locator('.lms-activity-entry').getByText(/Auto sync in [1-3]s/).waitFor();
   await page.screenshot({ path: join(runDir, 'activity-countdown.png') }); report.screenshots.push('activity-countdown.png');
   await page.waitForFunction(() => window.__activityGate === 'publish');
-  assert.match(await page.locator('.lms-activity-entry').innerText(), /Syncing/);
+  assert.match(await page.locator('.lms-activity-entry').innerText(), /同步文件/);
   await page.locator('.lms-activity-entry').click(); await surface('.lms-activity-panel');
-  await getUI().locator('.lms-activity-current').getByText('Publish', { exact: true }).waitFor();
+  await getUI().locator('.lms-activity-current').getByText('同步文件', { exact: true }).waitFor();
   await page.evaluate(() => window.__releaseActivity()); await page.waitForFunction(() => window.__activityGate === 'verify');
-  assert.match(await page.locator('.lms-activity-entry').innerText(), /Verifying/);
+  assert.match(await page.locator('.lms-activity-entry').innerText(), /安全校验/);
   await page.evaluate(() => window.__releaseActivity());
   await page.waitForFunction(() => app.plugins.plugins['local-mirror-sync'].product.snapshot().auto.result === 'Verified');
   assert.equal(remote.text('note.md'), '# Auto activity');

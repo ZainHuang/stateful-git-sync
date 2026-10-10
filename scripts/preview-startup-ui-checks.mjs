@@ -12,6 +12,8 @@ export async function verifyPreviewStartup({ page, remote, report, runDir, previ
   await surface('.lms-preview-modal');
   let ui = getUI(); await ui.setViewportSize({ width: 390, height: 844 });
   await ui.evaluate(() => document.body.classList.add('emulate-mobile'));
+  assert.deepEqual(await ui.locator('.lms-business-stages li').allTextContents(), ['检查差异', '同步文件', '安全校验']);
+  await ui.locator('.lms-technical-details summary').click();
   await ui.getByText('Waiting for local file identity updates', { exact: true }).waitFor();
   const bounds = await ui.locator('.lms-preview-modal').boundingBox();
   const cancel = ui.getByRole('button', { name: 'Cancel', exact: true }); const cancelBounds = await cancel.boundingBox();

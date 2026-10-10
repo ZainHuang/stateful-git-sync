@@ -4,8 +4,9 @@ import type { SyncVault } from '../sync/execution/SyncVault';
 import { gitBlobSha } from './HashService';
 import { obsidianVaultReader } from './ObsidianVaultReader';
 import { assertPath } from './paths';
+import type { SyncPerformance } from '../product/SyncPerformance';
 
-export function obsidianSyncVault(vault: Vault): SyncVault {
+export function obsidianSyncVault(vault: Vault, measurement: () => SyncPerformance | undefined = () => undefined): SyncVault {
   const adapter = vault.adapter;
   const internal = (path: string) => { assertPath(path); if (!path.startsWith('.local-mirror-sync/transactions/')) throw new Error('Invalid internal path'); };
   const parents = async (path: string) => {
@@ -19,7 +20,8 @@ export function obsidianSyncVault(vault: Vault): SyncVault {
   const hash = async (path: string) => {
     const stat = await adapter.stat(path); if (!stat) return null;
     if (stat.type !== 'file') throw new PreviewError('LOCAL_APPLY', 'PATH_OCCUPIED', 'A directory occupies the destination. Recovery data is retained.');
-    return gitBlobSha(await adapter.readBinary(path));
+    const bytes = await adapter.readBinary(path); const metrics = measurement(); metrics?.localRead(bytes.byteLength, path.startsWith('.local-mirror-sync/'));
+    return gitBlobSha(bytes, metrics);
   };
   return {
     ...obsidianVaultReader(vault),
@@ -55,7 +57,7 @@ export function obsidianSyncVault(vault: Vault): SyncVault {
     apply: async (path, data, expected, recoveryPath) => {
       assertPath(path); internal(recoveryPath);
       if (path.startsWith('.local-mirror-sync/')) throw new Error('Protected path');
-      const current = await hash(path); const desired = data ? gitBlobSha(data) : null;
+      const current = await hash(path); const desired = data ? gitBlobSha(data, measurement()) : null;
       if (current === desired) return;
       const changed = () => new PreviewError('LOCAL_APPLY', 'LOCAL_CHANGED', `Local content differs at ${path}. Current contents are retained; transaction recovery copies are available. Review this file before resuming.`);
       const recovered = await hash(recoveryPath);
@@ -67,7 +69,7 @@ export function obsidianSyncVault(vault: Vault): SyncVault {
         // Obsidian process() serializes read/check/write and keeps the editor on the
         // same TFile. A concurrent editor save cannot be silently overwritten.
         await vault.process(tracked, text => {
-          const actual = gitBlobSha(new TextEncoder().encode(text));
+          const actual = gitBlobSha(new TextEncoder().encode(text), measurement());
           if (actual !== expected && actual !== desired) throw changed();
           return content;
         });

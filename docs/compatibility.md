@@ -14,6 +14,7 @@ Obsidian uses the plugin ID to find the installation and plugin settings. The ru
 | deviceId, BASE, local identity metadata | `<configDir>/plugins/local-mirror-sync/sync-state.json` |
 | Historical initialization metadata | Existing `device-state.json`, untouched |
 | Dashboard / Auto Sync cache | `<configDir>/plugins/local-mirror-sync/product-state.json` |
+| V1.2 derived local hash/change cache | `<configDir>/plugins/local-mirror-sync/local-change-index.json` |
 | Local history | `.sync-history/` |
 | Remote Manifest | `.local-mirror-sync/manifest.json` |
 | Local Recovery journal, objects, quarantine | `.local-mirror-sync/transactions/` |
@@ -28,6 +29,10 @@ Protected-path rules still exclude the plugin, tokens, state, local history and 
 Disable the plugin, replace only `main.js`, `manifest.json` and `styles.css` in the **existing** folder, then enable it. Do not uninstall, rename the folder, copy another device's metadata or delete pending Recovery. Existing command shortcuts and saved Dashboard views keep their IDs. The name shown in Settings and the command palette becomes Stateful Git Sync.
 
 No migration function runs. No Token, deviceId, BASE, Manifest or Recovery record is rewritten by display metadata changes. Internal implementation identifiers do not appear as product names in the UI.
+
+V1.2 adds a checksummed local change index; it does not change Manifest semantics or replace the existing sync executor. Every plugin load distrusts cached hashes until a full reconciliation finishes. The index is derived data, separate from BASE and deletion authority. Missing or damaged index data causes full reconciliation rather than a reset of sync state.
+
+New transaction journals may record the exact retained content hashes and verification level. Incremental transactions retain both relevant versions of every changed path; unchanged files are not overwritten. Older journals without these optional fields remain readable and use the original full-retention rules. Recovery with local writes performs full verification before BASE. Published transactions with no local writes retain the existing snapshot-only Recovery behavior and preserve subsequent edits.
 
 ## Regression coverage
 

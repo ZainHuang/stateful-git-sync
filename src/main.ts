@@ -16,12 +16,16 @@ import { obsidianProductStorage } from './product/ObsidianProductStorage';
 import { DashboardView, DASHBOARD_VIEW, HISTORY_VIEW } from './ui/DashboardView';
 import { IgnoreService } from './vault/IgnoreService';
 import { recoveryDetails, type RecoveryAction } from './ui/RecoveryUI';
+import { LOCAL_CHANGE_INDEX_FILENAME, LocalChangeIndex } from './vault/LocalChangeIndex';
+// Obsidian mobile can emit this native lifecycle event in addition to visibility.
+declare global { interface DocumentEventMap { resume: Event } }
 
 export default class LocalMirrorSyncPlugin extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
   tokens!: TokenStore;
   syncState!: LocalStateStore;
   sync!: SyncService;
+  changeIndex!: LocalChangeIndex;
   product!: ProductStore;
   productError?: unknown;
   auto!: AutoSyncController;
@@ -54,14 +58,18 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       write: contents => adapter.write(statePath, contents),
     });
     try { await this.syncState.load(); } catch (error) { this.stateError = error; }
+    const indexPath = `${this.app.vault.configDir}/plugins/local-mirror-sync/${LOCAL_CHANGE_INDEX_FILENAME}`;
+    this.changeIndex = new LocalChangeIndex({ read: async () => await adapter.exists(indexPath) ? adapter.read(indexPath) : null, write: contents => adapter.write(indexPath, contents) });
+    await this.changeIndex.load();
     this.product = new ProductStore(obsidianProductStorage(this.app.vault), () => this.refreshDashboard());
     try {
       await this.product.load(this.stateError ? '00000000-0000-4000-8000-000000000000' : this.syncState.current().deviceId, this.settings.deviceName, this.settings.deviceType);
     } catch (error) { this.productError = error; }
-    this.sync = new SyncService(obsidianSyncVault(this.app.vault), async request => {
+    this.sync = new SyncService(obsidianSyncVault(this.app.vault, () => this.sync?.performance), async request => {
       const response = await requestUrl(request);
       return { status: response.status, json: response.status >= 200 && response.status < 300 ? response.json : null };
-    }, this.app.vault.configDir, this.syncState, this.product);
+    }, this.app.vault.configDir, this.syncState, this.product, this.changeIndex);
+    this.queueIdentityUpdates();
     this.registerView(DASHBOARD_VIEW, leaf => new DashboardView(leaf, this));
     this.registerView(HISTORY_VIEW, leaf => new DashboardView(leaf, this, true));
     if (!Platform.isMobile) {
@@ -90,15 +98,13 @@ export default class LocalMirrorSyncPlugin extends Plugin {
         if (block) throw new PreviewError('AUTO', 'MANUAL_REQUIRED', block);
         try { await this.sync.execute(preview, this.tokens.read(this.settings)); }
         catch (error) { await this.recordFailure(error); throw error; }
+        finally { this.queueIdentityUpdates(); await this.metadataPending; }
       },
       status: status => this.product.auto(status),
     }, this.product.snapshot().auto);
     try { if (this.stateError || await this.sync.transactions.active()) await this.product.failure(this.stateError, true); }
     catch (error) { await this.recordFailure(error); }
     this.addSettingTab(new SettingsTab(this.app, this));
-    const track = (work: () => Promise<unknown>) => {
-      if (!this.stateError && !this.sync.executing) this.metadataPending = this.metadataPending.then(work).catch(error => { this.stateError = error; });
-    };
     const userPath = (path: string) => !new IgnoreService({ configDir: this.app.vault.configDir, includeObsidian: this.settings.includeObsidian, patterns: this.settings.ignorePatterns, gitignore: '' }).reason(path);
     // Preserve V1 identity tracking even for user-ignored notes: a later scope
     // review still needs the recorded rename/delete evidence.
@@ -107,18 +113,26 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       this.productPending = this.productPending.then(() => this.product.dirty()).catch(error => { this.productError = error; this.refreshDashboard(); });
       this.auto.changed();
     };
+    const observe = (kind: 'create' | 'modify' | 'delete' | 'rename', path: string, oldPath?: string) => {
+      const protection = new IgnoreService({ configDir: this.app.vault.configDir, includeObsidian: true, patterns: '', gitignore: '' });
+      if (protection.protectedReason(path) && (!oldPath || protection.protectedReason(oldPath))) return;
+      this.changeIndex.record(kind, path, oldPath, identityPath(path) && (!oldPath || identityPath(oldPath)));
+      this.queueIdentityUpdates();
+      if (userPath(path) || oldPath && userPath(oldPath)) dirty();
+    };
     // Obsidian announces every existing file as "create" during startup. Those
     // events must not enqueue identity/cache writes or recreate deleted identities.
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
-      this.registerEvent(this.app.vault.on('create', file => { if (identityPath(file.path)) track(() => this.syncState.recordCreate(file.path)); if (userPath(file.path)) dirty(); }));
+      this.registerEvent(this.app.vault.on('create', file => observe('create', file.path)));
     });
-    this.registerEvent(this.app.vault.on('modify', file => { if (userPath(file.path)) dirty(); }));
-    this.registerEvent(this.app.vault.on('delete', file => { if (identityPath(file.path)) track(() => this.syncState.recordDelete(file.path)); if (userPath(file.path)) dirty(); }));
-    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      if (identityPath(oldPath) && identityPath(file.path)) track(() => this.syncState.recordRename(oldPath, file.path));
-      if (userPath(oldPath) || userPath(file.path)) dirty();
-    }));
+    this.registerEvent(this.app.vault.on('modify', file => observe('modify', file.path)));
+    this.registerEvent(this.app.vault.on('delete', file => observe('delete', file.path)));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => observe('rename', file.path, oldPath)));
+    const resumed = () => { this.sync.invalidateIndex('mobile-resume'); this.auto.changed(); };
+    this.registerDomEvent(document, 'visibilitychange', () => { if (document.hidden) this.sync.invalidateIndex('backgrounded'); else resumed(); });
+    this.registerDomEvent(document, 'resume', resumed);
+    this.registerDomEvent(window, 'pageshow', event => { if (event.persisted) resumed(); });
     this.addCommand({ id: 'preview-sync', name: 'Preview Sync', callback: () => this.openPreview() });
     this.addCommand({ id: 'sync', name: 'Sync (review first)', callback: () => this.openPreview() });
     this.addCommand({ id: 'verify-sync', name: 'Verify Sync (read-only)', callback: () => this.openPreview(true) });
@@ -130,6 +144,22 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     this.activityRibbon.addClass('lms-activity-ribbon');
     this.refreshDashboard();
     // Opening the app does not scan. Saved Auto Sync reacts to subsequent Vault events.
+  }
+
+  private queueIdentityUpdates(): void {
+    if (this.stateError || this.sync.executing) return;
+    this.metadataPending = this.metadataPending.then(async () => {
+      if (this.sync.executing) return;
+      for (const event of this.changeIndex.identityEvents()) {
+        if (event.kind === 'rename') await this.syncState.recordRename(event.oldPath!, event.path);
+        else if (event.kind === 'delete') await this.syncState.recordDelete(event.path);
+        else await this.syncState.recordCreate(event.path);
+        this.changeIndex.acknowledgeIdentity(event.revision);
+        // Persist acknowledgment before applying another identity event. A
+        // crash can then replay at most one already-applied idempotent event.
+        await this.changeIndex.flush();
+      }
+    }).catch(error => { this.stateError = error; });
   }
 
   private syncOptions() {
@@ -165,15 +195,16 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       if (entry === this.statusBar) {
         let icon = entry.querySelector<HTMLElement>('.lms-activity-icon');
         if (!icon) { icon = entry.createSpan({ cls: 'lms-activity-icon' }); entry.createSpan({ cls: 'lms-activity-label' }); }
-        const iconName = status.animated ? 'refresh-cw' : status.label === 'Healthy' || status.label === 'Synced & verified' ? 'check' : 'circle-alert';
+        const iconName = status.animated ? 'refresh-cw' : status.label === 'Healthy' || status.label === 'Verified' ? 'check' : 'circle-alert';
         if (icon.dataset.icon !== iconName) { setIcon(icon, iconName); icon.dataset.icon = iconName; }
         entry.querySelector('.lms-activity-label')!.textContent = status.label;
       }
     }
     this.activityPanel?.render();
+    this.previewModal?.renderActivity();
     // Clock redraws only. No lifecycle events, persistence, scans or requests.
     const a = this.product.activitySnapshot();
-    const needsClock = a.running || this.product.snapshot().auto.scheduledAt !== undefined || a.verified && Date.now() - (a.endedAt ?? 0) < 4000;
+    const needsClock = a.running || this.product.snapshot().auto.scheduledAt !== undefined;
     if (needsClock && this.activityClock === undefined) this.activityClock = window.setInterval(() => this.refreshActivity(), 1000);
     else if (!needsClock && this.activityClock !== undefined) { window.clearInterval(this.activityClock); this.activityClock = undefined; }
   }
@@ -202,6 +233,9 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     const settings = { ...this.settings };
     const settingsKey = JSON.stringify(settings);
     this.previewModal = new PreviewModal(this.app, options, async (progress, signal) => {
+      this.product.activity({ type: 'start', operation: 'preview' });
+      let preflightError: string | undefined;
+      try {
       progress('Waiting for local file identity updates');
       await readWithTimeout(() => this.metadataPending, 'LOCAL_STATE', signal,
         'Local file identity updates did not finish within 30 seconds. Let Vault loading finish, then retry Preview. Pending updates are retained.');
@@ -211,7 +245,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       if (this.stateError) throw this.stateError instanceof Error ? this.stateError : new Error(safeError(this.stateError));
       if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Reopen Preview to use the new target and ignore rules.');
       let result;
-      try { result = await this.sync.preview(options, this.tokens.read(settings), progress, signal); }
+      try { result = await this.sync.preview(options, this.tokens.read(settings), progress, signal, {}, verifyOnly); }
       catch (error) {
         if (!signal.aborted) {
           progress('Saving Preview diagnostics');
@@ -220,10 +254,11 @@ export default class LocalMirrorSyncPlugin extends Plugin {
         }
         throw error;
       }
-      // Content is hashed twice by PreviewSnapshotReader; a delayed filesystem
-      // notification for unchanged bytes must not invalidate a verified snapshot.
+      // Preview revalidates through the same index/scanner, retaining later events.
       if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed during Preview. Run Preview again.');
       return result;
+      } catch (error) { preflightError = signal.aborted ? undefined : safeError(error); throw error; }
+      finally { if (this.product.activitySnapshot().running && !this.sync.running) this.product.activity({ type: 'end', error: preflightError }); }
     }, verifyOnly ? undefined : {
       execute: async (result, progress, signal, confirmation) => {
         await this.metadataPending;
@@ -231,6 +266,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
         if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Refresh Preview.');
         try { await this.sync.execute(result, this.tokens.read(settings), progress, signal, confirmation); this.auto.reviewed(); }
         catch (error) { try { this.syncState.current(); } catch (stateError) { this.stateError = stateError; } await this.recordFailure(error); throw error; }
+        finally { this.queueIdentityUpdates(); await this.metadataPending; }
       },
       resolve: (result, key, choice) => this.sync.resolve(result, key, choice),
       resolveAll: (result, choice) => this.sync.resolveAll(result, choice),
@@ -238,7 +274,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       inspect: (result, entry) => this.sync.inspect(result, entry, this.tokens.read(settings)),
       recover: action => this.openRecovery(action),
       recoveryPending: async () => !!await this.sync.transactions.active(),
-    }, action => this.openRecovery(action));
+    }, action => this.openRecovery(action), () => this.product.activitySnapshot());
     const onClose = this.previewModal.onClose.bind(this.previewModal);
     this.previewModal.onClose = () => { onClose(); this.reviewing = false; };
     this.previewModal.open();
@@ -250,6 +286,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     try { await this.saveData(saved); }
     catch { throw new PreviewError('SETTINGS', 'SAVE_FAILED', 'Settings could not be saved.'); }
     this.settings = saved;
+    this.sync.invalidateIndex('settings-changed');
     await this.product.configure(saved.deviceName, saved.deviceType);
     this.auto.configure(); this.refreshDashboard();
   }
@@ -331,7 +368,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
               || !isLegacyPublished(t) && t.phase !== 'prepared' && ['RECOVERY_LOCAL_CHANGED', 'LOCAL_VERIFY_FAILED'].includes(error.code)))
               actions.createEl('button', { text: 'Start fresh Preview from current HEAD', cls: 'lms-recovery-fresh' }).onclick = () => { void run('fresh-preview'); };
           }
-        } finally { running = false; }
+        } finally { running = false; this.queueIdentityUpdates(); }
       };
       actions.createEl('button', { text: 'Resume Transaction', cls: 'mod-cta' }).onclick = () => { void run('resume'); };
       const abort = actions.createEl('button', { text: 'Abort Transaction' });

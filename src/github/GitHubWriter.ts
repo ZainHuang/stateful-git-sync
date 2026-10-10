@@ -4,6 +4,7 @@ import { isRecord, isSha } from '../sync/manifest/ManifestValidator';
 import { GitHubClient } from './GitHubClient';
 import type { GitTransport, RepositoryTarget } from './types';
 import { decodeBytes, encodeBytes } from './BinaryCodec';
+import type { SyncPerformance } from '../product/SyncPerformance';
 export { decodeBytes, encodeBytes } from './BinaryCodec';
 
 // Bound memory use on iPhone; larger attachments must be excluded explicitly.
@@ -17,7 +18,7 @@ export type PublishEvent = { at: string } & (
 );
 export class GitHubWriter {
   readonly reader: GitHubClient;
-  constructor(private readonly target: RepositoryTarget, private readonly token: string, private readonly transport: GitTransport) {
+  constructor(private readonly target: RepositoryTarget, private readonly token: string, private readonly transport: GitTransport, private readonly measurement?: SyncPerformance) {
     this.reader = new GitHubClient(target, token, transport);
   }
   async head(): Promise<string> {
@@ -31,13 +32,13 @@ export class GitHubWriter {
       || typeof value.size !== 'number' || value.size > MAX_SYNC_FILE_BYTES || value.content.length > MAX_SYNC_FILE_BYTES * 1.5) throw failed('INVALID_BLOB');
     let bytes: Uint8Array;
     try { bytes = decodeBytes(value.content); } catch { throw failed('INVALID_BLOB'); }
-    if (bytes.length !== value.size || gitBlobSha(bytes) !== sha) throw failed('BLOB_HASH_MISMATCH');
+    if (bytes.length !== value.size || gitBlobSha(bytes, this.measurement) !== sha) throw failed('BLOB_HASH_MISMATCH');
     return bytes;
   }
   async upload(bytes: Uint8Array): Promise<string> {
     if (bytes.length > MAX_SYNC_FILE_BYTES) throw failed('FILE_TOO_LARGE');
     const sha = await this.create('blobs', { content: encodeBytes(bytes), encoding: 'base64' });
-    if (sha !== gitBlobSha(bytes)) throw failed('BLOB_HASH_MISMATCH');
+    if (sha !== gitBlobSha(bytes, this.measurement)) throw failed('BLOB_HASH_MISMATCH');
     return sha;
   }
   async create(resource: 'blobs' | 'trees' | 'commits', body: Record<string, unknown>): Promise<string> {

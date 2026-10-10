@@ -101,7 +101,10 @@ try {
   const localText = path => page.evaluate(path => app.vault.adapter.read(path), path);
   const state = () => page.evaluate(() => app.plugins.plugins['local-mirror-sync'].syncState.current());
 
-  if (process.argv.includes('--preview-startup')) {
+  if (process.argv.includes('--v12')) {
+    const { verifyV12 } = await import('./v12-ui-checks.mjs');
+    await verifyV12({ page, remote, report, runDir, preview, sync, close, surface, state, getUI: () => ui, inject, WritableVault, LocalStateStore, SyncService, options });
+  } else if (process.argv.includes('--preview-startup')) {
     const { verifyPreviewStartup } = await import('./preview-startup-ui-checks.mjs');
     await verifyPreviewStartup({ page, remote, report, runDir, preview, close, surface, getUI: () => ui, state });
   } else if (process.argv.includes('--preview-ux')) {

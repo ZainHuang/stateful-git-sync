@@ -16,7 +16,9 @@ export async function verifyV11({ page, remote, report, runDir, preview, sync, c
     throw new Error('Settings surface unavailable');
   };
   let s = await findSettings();
-  const autoRow = () => s.locator('.setting-item').filter({ has: s.getByText('Auto Sync', { exact: true }) });
+  // Declarative settings wrap the whole form in another .setting-item. Match
+  // the immediate field label so the two toggles cannot share a target.
+  const autoRow = () => s.locator('.setting-item:has(> .setting-item-info > .setting-item-name:text-is("Auto Sync"))');
   assert.equal(await autoRow().locator('.checkbox-container').evaluate(el => el.classList.contains('is-enabled')), false);
   assert.equal(await s.getByRole('spinbutton', { name: 'Auto Sync debounce (seconds)' }).inputValue(), '30');
   await s.getByRole('textbox', { name: 'Device name', exact: true }).fill('Windows-PC');

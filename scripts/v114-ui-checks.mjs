@@ -20,7 +20,11 @@ export async function verifyV114({ page, remote, report, runDir, preview, close,
   const error = getUI().locator('.lms-error').filter({ hasText: 'LOCAL_VERIFY_FAILED' });
   const text = await error.innerText();
   for (const expected of ['modified · note.md', 'added · 新增用户文件.md', 'expected blob SHA:', 'actual blob SHA:', 'ignored=false; protected/internal=false/false']) assert(text.includes(expected), expected);
-  assert(!text.includes('workspace-mobile.json')); assert.deepEqual(await state(), before);
+  // V1.2 now drains the create event observed during execution into the same
+  // identity store. Empty localFiles metadata may appear; every BASE/device
+  // field must still be exactly the pre-transaction value.
+  const pendingState = { ...before, localFiles: before.localFiles ?? {} };
+  assert(!text.includes('workspace-mobile.json')); assert.deepEqual(await state(), pendingState);
   assert.equal(await error.evaluate(el => getComputedStyle(el).whiteSpace), 'pre-line');
   const active = () => page.evaluate(() => app.plugins.plugins['local-mirror-sync'].sync.transactions.active());
   assert.equal((await active()).phase, 'published');
@@ -28,7 +32,7 @@ export async function verifyV114({ page, remote, report, runDir, preview, close,
   report.checks.push('Post-publication Verify displays exact paths, SHA pairs and domain flags; real edits retain BASE and Recovery; workspace excluded');
   await close();
   await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].openRecovery()); await surface('.lms-recovery-dialog');
-  assert.deepEqual(await state(), before); assert(await active());
+  assert.deepEqual(await state(), pendingState); assert(await active());
   await getUI().setViewportSize({ width: 390, height: 844 });
   assert(await getUI().locator('.lms-recovery-dialog').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   await getUI().screenshot({ path: join(runDir, 'v114-02-recovery-mobile.png') }); report.screenshots.push('v114-02-recovery-mobile.png');

@@ -28,6 +28,16 @@ For example, if a laptop deletes an unchanged note while a phone is offline, the
 
 [Install](#installation) · [Latest release](https://github.com/ZainHuang/stateful-git-sync/releases/latest) · [Report an issue](https://github.com/ZainHuang/stateful-git-sync/issues) · [Compatibility](docs/compatibility.md) · [Security](SECURITY.md)
 
+## V1.2: incremental sync and smart verification
+
+Normal sync reads dirty files and reuses previously verified hashes. It still reconciles the complete eligible file inventory and required metadata, and rotates through up to eight unchanged files for content audits. Mutable remote HEAD is always fetched; validated immutable Commit/Tree/Manifest metadata can be reused.
+
+**Incremental Verified** proves the changed files, deletion/rename results, remote snapshot and BASE while using trusted hashes for unchanged files. **Full Integrity Verified** additionally hashes every eligible local file. Restart, mobile foreground/resume, damaged caches, unobserved inventory/metadata changes, changed ignore scope, a 24-hour deadline or the twentieth sync trigger full reconciliation. Initialization and Recovery with local writes also use full verification. Standalone **Verify Sync (read-only)** always audits all local content. The existing published Recovery path that preserves subsequent local edits is labeled **Published Snapshot Verified**.
+
+The shared activity view shows **检查差异 → 同步文件 → 安全校验**, actual counts and elapsed time. Expand **技术详情** for technical stages and read/hash/API measurements. Completion leaves a static **Verified** status; conflicts and Recovery expose the required actions.
+
+The derived `local-change-index.json` cache is stored inside the existing plugin directory and can be rebuilt without changing device identity or BASE. Keep the normal upgrade procedure and retained Recovery records. See the [validation record](docs/validation.md) for measured results and the physical-device validation boundary.
+
 ## How synchronization works
 
 The plugin runs on desktop and mobile without installing Git, Node.js or a server on your phone. Each device exchanges notes, attachments and file identity information through the same GitHub repository.

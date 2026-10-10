@@ -10,6 +10,8 @@ import type { LocalSyncState } from '../state/LocalSyncState';
 import type { SyncVault } from './SyncVault';
 import type { Observation } from '../../product/ProductStore';
 import type { PublishEvent } from '../../github/GitHubWriter';
+import type { SyncPerformance, VerificationLevel } from '../../product/SyncPerformance';
+import { changedVerificationPaths } from './VerificationScope';
 
 export interface SyncTransaction {
   version: 1; id: string; options: PreviewOptions; originalState: LocalSyncState; scopeKey: string;
@@ -17,6 +19,9 @@ export interface SyncTransaction {
   before: Record<string, string>; after: Record<string, string>;
   adoptionChoice?: 'local' | 'remote'; backupRef?: string;
   observation?: Observation; createdAt?: string;
+  // V1.2 local journal evidence only. Full maps and Manifest semantics are unchanged.
+  retainedHashes?: string[];
+  verification?: VerificationLevel;
   // Optional local diagnostic evidence, never publication authority or planner input.
   publication?: { treeSha: string; events: PublishEvent[] };
   // Local audit only; original publication, Manifest and phase remain evidence.
@@ -28,18 +33,18 @@ const ROOT = '.local-mirror-sync/transactions';
 export const sameTransactionTarget = (a: Pick<PreviewOptions, 'owner' | 'repository' | 'branch'>, b: Pick<PreviewOptions, 'owner' | 'repository' | 'branch'>) => a.owner.toLowerCase() === b.owner.toLowerCase() && a.repository.toLowerCase() === b.repository.toLowerCase() && a.branch === b.branch;
 export const recoveryError = () => new PreviewError('RECOVERY', 'RECOVERY_REQUIRED', 'A pending or damaged transaction needs recovery. No new sync can start. Recovery files remain in .local-mirror-sync/transactions.');
 export const recoveryEnvironmentChanged = (detail = 'Recovery environment changed or could not be verified.') => new PreviewError('RECOVERY', 'RECOVERY_ENV_CHANGED', `${detail} Recovery data is retained. Preview stays blocked until recovery completes or a safe Abort succeeds. Correct the reported condition, then retry Resume Transaction.`);
-function pack(value: unknown): string {
+function pack(value: unknown, measurement?: SyncPerformance): string {
   const payload = JSON.stringify(value);
-  return JSON.stringify({ sha: gitBlobSha(new TextEncoder().encode(payload)), payload });
+  return JSON.stringify({ sha: gitBlobSha(new TextEncoder().encode(payload), measurement, true), payload });
 }
-function unpack(raw: string | null): unknown {
+function unpack(raw: string | null, measurement?: SyncPerformance): unknown {
   if (!raw) throw recoveryError();
   const envelope: unknown = JSON.parse(raw);
-  if (!isRecord(envelope) || typeof envelope.payload !== 'string' || gitBlobSha(new TextEncoder().encode(envelope.payload)) !== envelope.sha) throw recoveryError();
+  if (!isRecord(envelope) || typeof envelope.payload !== 'string' || gitBlobSha(new TextEncoder().encode(envelope.payload), measurement, true) !== envelope.sha) throw recoveryError();
   return JSON.parse(envelope.payload);
 }
 export class TransactionStore {
-  constructor(private readonly vault: SyncVault) {}
+  constructor(private readonly vault: SyncVault, private readonly measurement?: SyncPerformance) {}
   directory(id: string) { if (!/^[a-f0-9-]{36}$/.test(id)) throw recoveryError(); return `${ROOT}/${id}`; }
   /** Historical path hints only, never file-deletion or BASE authority. Old
    * completed journals let upgrades clean folders left by earlier executors. */
@@ -51,7 +56,7 @@ export class TransactionStore {
       if (!/^[a-f0-9-]{36}$/.test(id) || id === current.id || folder !== this.directory(id)) continue;
       for (const name of ['journal.json', 'journal-copy.json']) {
         try {
-          const value = unpack(await this.vault.readInternal(`${folder}/${name}`)) as SyncTransaction;
+          const value = unpack(await this.vault.readInternal(`${folder}/${name}`), this.measurement) as SyncTransaction;
           if (value.version !== 1 || value.id !== id || value.phase !== 'complete' || value.scopeKey !== current.scopeKey
             || !sameTransactionTarget(value.options, current.options) || value.originalState.deviceId !== current.originalState.deviceId) continue;
           parseLocalState(value.originalState); parseManifest(value.manifest);
@@ -72,8 +77,8 @@ export class TransactionStore {
     try {
       const id: unknown = JSON.parse(pointer); if (typeof id !== 'string') throw recoveryError();
       let decoded: unknown;
-      try { decoded = unpack(await this.vault.readInternal(`${this.directory(id)}/journal.json`)); }
-      catch { decoded = unpack(await this.vault.readInternal(`${this.directory(id)}/journal-copy.json`)); }
+      try { decoded = unpack(await this.vault.readInternal(`${this.directory(id)}/journal.json`), this.measurement); }
+      catch { decoded = unpack(await this.vault.readInternal(`${this.directory(id)}/journal-copy.json`), this.measurement); }
       const transaction = decoded as SyncTransaction;
       if (transaction.version !== 1 || transaction.id !== id || !isSha(transaction.originalHead) || !isSha(transaction.commit)
         || !['prepared', 'published', 'applying', 'verified', 'complete'].includes(transaction.phase)) throw recoveryError();
@@ -94,11 +99,14 @@ export class TransactionStore {
         if (!isRecord(map)) throw recoveryError();
         for (const [path, sha] of Object.entries(map)) { assertPath(path); if (portablePathIssue(path) || !isSha(sha) || path.startsWith('.local-mirror-sync/')) throw recoveryError(); }
       }
+      if (transaction.retainedHashes !== undefined && (!Array.isArray(transaction.retainedHashes) || transaction.retainedHashes.some(s => !isSha(s))
+        || transaction.adoptionChoice || changedVerificationPaths(transaction).some(path => [transaction.before[path], transaction.after[path]].some(s => s && !transaction.retainedHashes!.includes(s))))) throw recoveryError();
+      if (transaction.verification !== undefined && !['Incremental Verified', 'Full Integrity Verified', 'Published Snapshot Verified'].includes(transaction.verification)) throw recoveryError();
       return transaction;
     } catch { throw recoveryError(); }
   }
   async save(t: SyncTransaction): Promise<void> {
-    const envelope = pack(t);
+    const envelope = pack(t, this.measurement);
     // Both copies must be read back before publication can begin. A torn later
     // checkpoint can recover the already-durable candidate commit from either copy.
     await this.write(`${this.directory(t.id)}/journal.json`, envelope);
@@ -108,7 +116,7 @@ export class TransactionStore {
   async retainFreshPreview(t: SyncTransaction, review: { head: string; generation: number; baseState: LocalSyncState; local: Record<string, string>; differences: string[] }) {
     await this.write(`${this.directory(t.id)}/fresh-preview-${crypto.randomUUID()}.json`, pack({
       action: 'START_FRESH_PREVIEW', transactionId: t.id, timestamp: new Date().toISOString(), phase: t.phase, commit: t.commit, ...review,
-    }));
+    }, this.measurement));
   }
   async clear() { await this.write(`${ROOT}/active.json`, 'null'); }
   async removePending() {
@@ -117,7 +125,7 @@ export class TransactionStore {
   }
   async putBlob(id: string, bytes: Uint8Array) {
     this.directory(id);
-    const sha = gitBlobSha(bytes); const path = `${ROOT}/objects/blobs/${sha}`;
+    const sha = gitBlobSha(bytes, this.measurement); const path = `${ROOT}/objects/blobs/${sha}`;
     if (await this.vault.readInternal(path) !== null) { await this.blob(id, sha); return sha; }
     await this.write(path, encodeBytes(bytes)); return sha;
   }
@@ -125,7 +133,7 @@ export class TransactionStore {
     if (!isSha(sha)) throw recoveryError();
     this.directory(id);
     const text = await this.vault.readInternal(`${ROOT}/objects/blobs/${sha}`);
-    try { if (text === null) throw recoveryError(); const bytes = decodeBytes(text); if (gitBlobSha(bytes) !== sha) throw recoveryError(); return bytes; }
+    try { if (text === null) throw recoveryError(); const bytes = decodeBytes(text); if (gitBlobSha(bytes, this.measurement) !== sha) throw recoveryError(); return bytes; }
     catch { throw recoveryError(); }
   }
   private async write(path: string, contents: string) {
