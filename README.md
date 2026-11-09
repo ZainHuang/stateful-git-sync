@@ -20,7 +20,7 @@ Stateful Git Sync makes these questions part of the synchronization protocol:
 | Conflicting edits | Require an explicit **Use LOCAL / Use REMOTE** choice for supported conflicts. No automatic text merge or last-writer-wins rule. Keep both edits in separate copies if you need to merge them manually. |
 | A new, empty device | Initialize from the remote Manifest and establish its own BASE. An empty device without sync history is not evidence that the remote files should be deleted. |
 | Interrupted synchronization | Keep transaction journals and recovery copies, then resume and verify the transaction. A successful upload alone is not a completed sync. |
-| Completion | Publish files and their Manifest together, verify the remote snapshot and relevant local bytes, then save and read back the verified BASE before recording success. |
+| Completion | Publish files and their Manifest together, verify the remote snapshot and relevant local contents or frozen upload, then save and read back the verified BASE before recording success. |
 
 For example, if a laptop deletes an unchanged note while a phone is offline, the phone can later apply the recorded deletion. If the phone edited that note while offline, the deletion and edit become a conflict to review. A text merge alone does not express that decision.
 
@@ -37,6 +37,10 @@ Normal sync reads dirty files and reuses previously verified hashes. It still re
 The shared activity view shows **检查差异 → 同步文件 → 安全校验**, actual counts and elapsed time. Expand **技术详情** for technical stages and read/hash/API measurements. Completion leaves a static **Verified** status; conflicts and Recovery expose the required actions.
 
 The derived `local-change-index.json` cache is stored inside the existing plugin directory and can be rebuilt without changing device identity or BASE. Keep the normal upgrade procedure and retained Recovery records. See the [validation record](docs/validation.md) for measured results and the physical-device validation boundary.
+
+### V1.2.1: snapshot uploads and automatic retry
+
+For eligible conflict-free uploads, the plugin publishes a verified, frozen snapshot. Edits made after that snapshot is staged stay local and enter a later sync. Downloads, conflict choices, scope changes and Recovery retain their existing protection and review requirements.
 
 ## How synchronization works
 
@@ -168,11 +172,13 @@ On mobile, tap a file to open a separate details dialog and choose **Use LOCAL /
 
 Auto Sync defaults to **OFF**. After initialization and a successful manual sync, you can enable it in settings. Local vault create, modify, delete and rename events trigger a debounced check after **30 seconds** by default. It executes only small, conflict-free plans that pass safety checks; defaults allow at most **5 removed paths and 20 changed files**.
 
-It does not periodically poll GitHub. Merely opening Obsidian does not trigger a remote scan or pull. Conflicts, a remote Manifest changed relative to BASE, initialization, Adoption, scope changes, Recovery and threshold violations pause automatic execution for manual review. Check the Dashboard reason and run Preview; a paused sync is not a completed sync.
+It does not periodically poll GitHub. When no retry is pending, merely opening Obsidian does not trigger a remote scan or pull. Conflicts, a remote Manifest changed relative to BASE, initialization, Adoption, scope changes, Recovery and threshold violations pause automatic execution for manual review. Check the Dashboard reason and run Preview; a paused sync is not a completed sync.
+
+When no transaction is pending, recoverable local changes during scanning, temporary network errors, timeouts and supported rate-limit/server errors are queued for another attempt after the configured Auto Sync delay. The activity view shows the retry countdown. A pending transaction still requires Recovery; retry never resolves a conflict or completes Recovery automatically.
 
 ## Verification and conflict review
 
-Executing synchronization verifies the remote commit, Tree and Manifest, relevant local bytes, and saved sync state. **BASE advances and success history is recorded only after successful verification.**
+Executing synchronization verifies the remote commit, Tree and Manifest, relevant local bytes or the frozen upload snapshot, and saved sync state. **BASE advances and success history is recorded only after successful verification.**
 
 **Verify Sync (read-only)** is a status check: it does not upload, download, resolve conflicts or advance BASE. If it finds differences, return to a normal Preview.
 

@@ -48,7 +48,8 @@ export async function verifyV12({ page, remote, report, runDir, preview, sync, c
     await ui.locator('.lms-activity-current').getByText('Verified', { exact: true }).waitFor();
     assert.equal(await ui.locator('.lms-technical-details').getAttribute('open'), null);
     assert.equal(await ui.locator('.lms-business-stages').isVisible(), false);
-    await ui.locator('.lms-technical-details summary').click(); assert.equal(await ui.locator('.lms-performance-table tbody tr').count(), 5);
+    await ui.locator('.lms-technical-details summary').click(); assert.equal(await ui.locator('.lms-performance-table').first().locator('tbody tr').count(), 5);
+    assert.equal(await ui.locator('.lms-operation-performance tbody tr').count(), 10);
     assert(await ui.locator('.lms-activity-panel').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
     assert.equal(remote.calls.length, requests); await shot(`v12-${name}-details`);
     await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].activityPanel.close());
@@ -61,7 +62,9 @@ export async function verifyV12({ page, remote, report, runDir, preview, sync, c
     await app.vault.modify(app.vault.getAbstractFileByPath('Performance/note-300.md'), '# Missed event before mobile resume');
     p.changeIndex.record = record; document.dispatchEvent(new Event('resume'));
   });
-  benchmark.scenarios.mobileResume = await run(); assert.equal(benchmark.scenarios.mobileResume.verification, 'Full Integrity Verified'); assert.equal(remote.text('Performance/note-300.md'), '# Missed event before mobile resume');
+  benchmark.scenarios.mobileResume = await run();
+  assert(benchmark.scenarios.mobileResume.scan.localReads >= 540, 'Resume must still reconcile every file before freezing the upload');
+  assert.equal(benchmark.scenarios.mobileResume.verification, 'Published Snapshot Verified'); assert.equal(remote.text('Performance/note-300.md'), '# Missed event before mobile resume');
   await page.evaluate(async () => { const p = app.plugins.plugins['local-mirror-sync']; await p.changeIndex.flush(); await app.vault.adapter.write(`${app.vault.configDir}/plugins/local-mirror-sync/local-change-index.json`, '{damaged'); });
   benchmark.scenarios.indexDamage = await run(); assert.equal(benchmark.scenarios.indexDamage.verification, 'Full Integrity Verified');
   await page.evaluate(async () => { await app.plugins.unloadPlugin('local-mirror-sync'); await app.plugins.enablePlugin('local-mirror-sync'); }); await inject();

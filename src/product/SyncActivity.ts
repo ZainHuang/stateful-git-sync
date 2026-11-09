@@ -7,7 +7,7 @@ export interface ActivitySnapshot {
   steps: { stage: ActivityStage; at: number }[];
   startedAt?: number; endedAt?: number; transactionId?: string; generation?: number;
   processed?: number; total?: number; error?: string; verified: boolean; review?: boolean;
-  performance?: PerformanceSnapshot; verification?: VerificationLevel; pendingChanges?: boolean;
+  performance?: PerformanceSnapshot; verification?: VerificationLevel; pendingChanges?: boolean; retrying?: boolean;
 }
 export type ActivityEvent =
   | { type: 'start'; operation: 'preview' | 'sync' }
@@ -31,8 +31,14 @@ export function activityIndicator(cache: ProductCache, activity: ActivitySnapsho
   }
   if (cache.status === 'Recovery Required') return result('Review required · Recovery required', 'recovery');
   if (cache.status === 'Conflict') return result('Review required · Conflict', 'preview');
-  if (error || activity.error || cache.status === 'Offline' || cache.auto.result === 'Offline') return result('Error');
+  if (error || activity.error) return result('Error');
+  if (cache.auto.result === 'Waiting to retry') {
+    const remaining = cache.auto.scheduledAt === undefined ? '' : ` · ${Math.max(0, Math.ceil((cache.auto.scheduledAt - now) / 1000))}s`;
+    return result(`等待自动重试${remaining}`);
+  }
+  if (cache.status === 'Offline' || cache.auto.result === 'Offline') return result('Error');
   if (cache.auto.result === 'Manual confirmation required' || activity.review) return result('Review required', 'preview');
+  if (activity.verified && activity.pendingChanges) return result('Snapshot synced · New changes queued');
   if (cache.auto.scheduledAt !== undefined) return result(`Auto sync in ${Math.max(0, Math.ceil((cache.auto.scheduledAt - now) / 1000))}s`);
   if (cache.status === 'Healthy' && activity.verified && !activity.pendingChanges) return result('Verified');
   return result(cache.status === 'Healthy' ? 'Healthy' : cache.lastChangeAt ? 'Local changes' : 'Review required', cache.lastChangeAt || cache.status === 'Healthy' ? 'activity' : 'preview');

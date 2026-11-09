@@ -101,7 +101,10 @@ try {
   const localText = path => page.evaluate(path => app.vault.adapter.read(path), path);
   const state = () => page.evaluate(() => app.plugins.plugins['local-mirror-sync'].syncState.current());
 
-  if (process.argv.includes('--v12')) {
+  if (process.argv.includes('--snapshot-upload')) {
+    const { verifySnapshotUpload } = await import('./snapshot-upload-ui-checks.mjs');
+    await verifySnapshotUpload({ page, remote, report, runDir, preview, sync, close, surface, state, getUI: () => ui, WritableVault, LocalStateStore, SyncService, options });
+  } else if (process.argv.includes('--v12')) {
     const { verifyV12 } = await import('./v12-ui-checks.mjs');
     await verifyV12({ page, remote, report, runDir, preview, sync, close, surface, state, getUI: () => ui, inject, WritableVault, LocalStateStore, SyncService, options });
   } else if (process.argv.includes('--preview-startup')) {

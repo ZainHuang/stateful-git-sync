@@ -22,7 +22,7 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
     a.vault.reads = []; a.edit('note-20.md', 'changed content'); await a.run();
     expect(a.remote.text('note-20.md')).toBe('changed content');
     expect(new Set(a.vault.reads).size).toBeLessThan(20);
-    expect(a.service.performanceSnapshot().verification).toBe('Incremental Verified');
+    expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it('syncs add, modify, attachment, delete, and rename-plus-edit with stable IDs and tombstones', async () => {
     const a = await indexedDevice({ 'A.md': 'a', 'image.bin': 'one' }); await a.run();
@@ -38,7 +38,7 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
     a.index.invalidate(reason); a.vault.reads = []; await a.run();
     expect(a.remote.text('note-30.md')).toBe('tamper 30');
     expect(new Set(a.vault.reads).size).toBe(40);
-    expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+    expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it('never trusts a checksum-valid saved index across a plugin restart', async () => {
     const a = await indexedDevice(files); await a.run(); await a.index.flush();
@@ -54,18 +54,18 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
     const a = await indexedDevice(files); await a.run(); a.vault.files.set('missed.md', bytes('lost create event'));
     await a.run(); expect(a.remote.text('missed.md')).toBe('lost create event');
     a.vault.files.delete('note-1.md'); await a.run(); expect(a.remote.contents()['note-1.md']).toBeUndefined();
-    expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+    expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it('audits equal-stat missed edits by bytes and escalates a sample mismatch to full reconciliation', async () => {
     const a = await indexedDevice(files, undefined, { sampleSize: 4, auditEvery: 100 }); await a.run();
     a.vault.files.set('note-0.md', bytes('tamper 0'));
     await a.run(); expect(a.remote.text('note-0.md')).toBe('tamper 0');
-    expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+    expect(new Set(a.vault.reads).size).toBe(40); expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it('forces periodic full audit by successful-cycle budget', async () => {
     const a = await indexedDevice(files, undefined, { auditEvery: 2, sampleSize: 0 }); await a.run(); await a.run();
     a.vault.files.set('note-39.md', bytes('tamper 39')); await a.run();
-    expect(a.remote.text('note-39.md')).toBe('tamper 39'); expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+    expect(a.remote.text('note-39.md')).toBe('tamper 39'); expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it.each(['time-expiry', 'clock-rollback'])('forces full content audit on %s with equal-stat missed bytes', async reason => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -75,7 +75,7 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
       a.vault.files.set('note-39.md', bytes('tamper 39'));
       vi.setSystemTime(reason === 'time-expiry' ? time + 24 * 60 * 60 * 1000 : time - 1);
       await a.run(); expect(a.remote.text('note-39.md')).toBe('tamper 39');
-      expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+      expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
     } finally { vi.useRealTimers(); }
   });
   it('invalidates ignore scope; does not infer deletion of excluded files', async () => {
@@ -103,7 +103,7 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
     const a = await indexedDevice(files); await a.run(); const original = a.vault.stat.bind(a.vault);
     a.vault.files.set('note-39.md', bytes('changed'));
     vi.spyOn(a.vault, 'stat').mockImplementation(async path => { const s = await original(path); return path === 'note-39.md' && s ? { ...s, mtime: 9 } : s; });
-    await a.run(); expect(a.remote.text('note-39.md')).toBe('changed'); expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+    await a.run(); expect(a.remote.text('note-39.md')).toBe('changed'); expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it('uses full byte verification when index persistence is unavailable', async () => {
     const a = await indexedDevice(files); a.storage.write = async () => { throw new Error('storage offline'); };
@@ -112,7 +112,7 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
   it('detects on-disk index damage while running and forces full verification', async () => {
     const a = await indexedDevice(files); await a.run(); await a.index.flush(); a.vault.internal.set('index', '{damaged');
     a.vault.files.set('note-39.md', bytes('tamper 39')); await a.run();
-    expect(a.remote.text('note-39.md')).toBe('tamper 39'); expect(a.service.performanceSnapshot().verification).toBe('Full Integrity Verified');
+    expect(a.remote.text('note-39.md')).toBe('tamper 39'); expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
   it('tracks directory rename/delete descendants; never reads protected state', async () => {
     const a = await indexedDevice({ 'folder/A.md': 'a', 'folder/B.md': 'b' }); await a.run();

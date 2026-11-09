@@ -115,6 +115,13 @@ export class ProductStore implements SyncObserver {
   async auto(status: AutoStatus): Promise<void> {
     const previous = JSON.stringify({ ...this.cache.auto, scheduledAt: undefined });
     this.cache.auto = { ...status };
+    this.live.retrying = status.result === 'Waiting to retry' && !['Recovery Required', 'Conflict'].includes(this.cache.status);
+    if (this.live.retrying) {
+      this.live.error = undefined; this.live.review = false; this.live.verified = false; this.live.running = false;
+      this.live.endedAt ??= Date.now(); this.cache.status = 'Sync Required';
+    }
+    // A pre-transaction edit is queued, not a failed or recoverable transaction.
+    if (status.result === 'Waiting for changes' && !status.reason && this.cache.status === 'Sync Required') this.live.error = undefined;
     if (previous === JSON.stringify({ ...status, scheduledAt: undefined })) { this.changed(); return; }
     await this.persist();
   }

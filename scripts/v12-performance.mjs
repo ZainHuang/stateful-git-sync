@@ -7,18 +7,20 @@ import { createServer } from 'node:http';
 import { performance } from 'node:perf_hooks';
 
 const root = resolve(import.meta.dirname, '..'); process.chdir(root);
-const artifacts = join(root, 'artifacts/v12'); await mkdir(artifacts, { recursive: true });
-const reuseBaseline = process.argv.includes('--use-baseline');
-const baseline = process.argv.includes('--baseline') || reuseBaseline; const label = baseline ? 'baseline' : 'optimized';
+const indexBenchmark = process.argv.some(arg => arg.startsWith('--index-'));
+const artifacts = join(root, indexBenchmark ? 'artifacts/index-performance' : 'artifacts/v12'); await mkdir(artifacts, { recursive: true });
+const reuseBaseline = process.argv.includes('--use-baseline') || process.argv.includes('--index-use-baseline');
+const baseline = process.argv.includes('--baseline') || process.argv.includes('--index-baseline') || reuseBaseline; const label = baseline ? 'baseline' : 'optimized';
 const modulePath = join(artifacts, `${label}.mjs`);
 if (baseline && !reuseBaseline) { try { await stat(modulePath); throw new Error('Baseline is immutable; use the existing artifact'); } catch (e) { if (e.code !== 'ENOENT') throw e; } }
 if (!reuseBaseline) await build({ entryPoints: ['scripts/v12-benchmark-entry.ts'], bundle: true, platform: 'node', format: 'esm', outfile: modulePath });
+console.log(`Using ${label} module: ${modulePath}`);
 const runtime = await import(pathToFileURL(modulePath).href);
 const { SyncService, LocalStateStore, GitFixture, gitBlobSha } = runtime;
 const options = { owner: 'test-owner', repository: 'test-repository', branch: 'main', includeObsidian: false, ignorePatterns: '', deleteSafetyThreshold: 100 };
 const utf8 = s => new TextEncoder().encode(s);
 class DiskVault {
-  reads = []; index; measurement;
+  reads = []; index; measurement; indexWrites = 0; indexWriteBytes = 0;
   constructor(directory) { this.directory = directory; }
   path(path) { const result = resolve(this.directory, path); assert(!relative(this.directory, result).startsWith('..')); return result; }
   async list(path) {
@@ -29,7 +31,10 @@ class DiskVault {
   async stat(path) { try { const s = await stat(this.path(path)); return { type: s.isFile() ? 'file' : 'folder', size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs }; } catch (e) { if (e.code === 'ENOENT') return null; throw e; } }
   async readBinary(path) { this.reads.push(path); const b = await readFile(this.path(path)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); }
   async readInternal(path) { try { return await readFile(this.path(path), 'utf8'); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } }
-  async writeInternal(path, text) { await mkdir(dirname(this.path(path)), { recursive: true }); await writeFile(this.path(path), text); }
+  async writeInternal(path, text) {
+    if (path.endsWith('/local-change-index.json')) { this.indexWrites++; this.indexWriteBytes += utf8(text).byteLength; }
+    await mkdir(dirname(this.path(path)), { recursive: true }); await writeFile(this.path(path), text);
+  }
   async removeInternal(path) { await unlink(this.path(path)).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
   async removeEmptyFolder(path, recovery) {
     if ((await this.stat(path))?.type !== 'folder') return;
@@ -57,16 +62,20 @@ async function fixtureDevice(remote, directory, files = {}, indexed = true) {
   let index;
   if (runtime.LocalChangeIndex && indexed) {
     const p = '.obsidian/plugins/local-mirror-sync/local-change-index.json';
-    index = new runtime.LocalChangeIndex({ read: () => vault.readInternal(p), write: s => vault.writeInternal(p, s) }); await index.load(); vault.index = index;
+    index = new runtime.LocalChangeIndex({ read: () => vault.readInternal(p), write: s => vault.writeInternal(p, s) }, {}, undefined, globalThis); await index.load(); vault.index = index;
   }
   const service = new SyncService(vault, remote.transport, '.obsidian', state, undefined, index);
   vault.measurement = service.performance;
   const run = async () => {
+    const writes = vault.indexWrites; const writeBytes = vault.indexWriteBytes;
     const start = performance.now(); const preview = await service.preview(options, 'fixture-token-only'); const scan = service.performanceSnapshot();
-    await service.execute(preview, 'fixture-token-only'); const execute = service.performanceSnapshot();
+    await service.execute(preview, 'fixture-token-only'); await index?.flush(); const execute = service.performanceSnapshot();
     const metrics = {};
     for (const key of ['localReads', 'localReadBytes', 'internalReads', 'internalReadBytes', 'hashCalls', 'hashBytes', 'metadataHashBytes', 'apiRequests', 'apiRequestBytes', 'apiResponseBytes', 'statCalls', 'listCalls', 'reusedHashes', 'cacheHits']) metrics[key] = (scan[key] ?? 0) + (execute[key] ?? 0);
     metrics.stages = Object.fromEntries(Object.keys(scan.stages).map(key => [key, Object.fromEntries(Object.keys(scan.stages[key]).map(field => [field, scan.stages[key][field] + execute.stages[key][field]]))]));
+    if (scan.operations && execute.operations) metrics.operations = Object.fromEntries(Object.keys(scan.operations).map(key => [key,
+      Object.fromEntries(Object.keys(scan.operations[key]).map(field => [field, scan.operations[key][field] + execute.operations[key][field]]))]));
+    metrics.indexWrites = vault.indexWrites - writes; metrics.indexWriteBytes = vault.indexWriteBytes - writeBytes;
     return { elapsedMs: performance.now() - start, ...metrics, verification: execute.verification, reconciliations: [...new Set([...scan.reconciliations, ...execute.reconciliations])] };
   };
   return { vault, state, service, index, run };
@@ -94,6 +103,17 @@ try {
   report.scenarios['modify-1'] = await a.run(); console.log(label, 'modify-1', report.scenarios['modify-1'].elapsedMs.toFixed(1));
   for (let i = 0; i < 10; i++) await a.vault.edit(`Notes/note-${String(i).padStart(3, '0')}.md`, utf8(`# Modified ten ${i}\n` + files[`Notes/note-${String(i).padStart(3, '0')}.md`]));
   report.scenarios['modify-10'] = await a.run(); console.log(label, 'modify-10', report.scenarios['modify-10'].elapsedMs.toFixed(1));
+  if (indexBenchmark) {
+    const writes = a.vault.indexWrites; const writeBytes = a.vault.indexWriteBytes; const start = performance.now(); a.service.performance.start();
+    for (let i = 0; i < 20; i++) {
+      await a.vault.edit('Notes/note-099.md', utf8(`# Save burst ${i}\n` + files['Notes/note-099.md']));
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    await a.index.flush(); a.service.performance.end(false);
+    report.scenarios['save-burst-20'] = { ...a.service.performanceSnapshot(), elapsedMs: performance.now() - start,
+      indexWrites: a.vault.indexWrites - writes, indexWriteBytes: a.vault.indexWriteBytes - writeBytes, note: 'Index event handling only; includes 20 deliberate 5ms waits and disk saves' };
+    await a.run(); assert.equal(fixture.text('Notes/note-099.md'), '# Save burst 19\n' + files['Notes/note-099.md']);
+  }
   for (let i = 20; i < 45; i++) { const old = `Notes/note-${String(i).padStart(3, '0')}.md`; const next = old.replace('Notes/', 'Renamed/'); await a.vault.move(old, next); await a.state.recordRename(old, next); }
   report.scenarios['rename-25'] = await a.run(); console.log(label, 'rename-25', report.scenarios['rename-25'].elapsedMs.toFixed(1));
   // Recovery with both a Push and a local PULL write must execute full Verify.
@@ -109,5 +129,6 @@ try {
   assert(fixture.calls.filter(c => c.method === 'PATCH').every(c => c.body.force === false));
   for (const [path, sha] of Object.entries(fixture.contents()).filter(([path]) => !path.startsWith('.'))) assert.equal(gitBlobSha(new Uint8Array(await a.vault.readBinary(path))), sha);
   await mkdir(join(runDir, 'test-repository'), { recursive: true }); await writeFile(join(runDir, 'test-repository/evidence.json'), JSON.stringify({ calls: fixture.calls, head: fixture.head, trees: [...fixture.trees], commits: [...fixture.commits] }, null, 2));
+  await writeFile(join(runDir, 'report.json'), JSON.stringify(report, null, 2));
   await writeFile(join(artifacts, `${label}.json`), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report.scenarios, null, 2));
 } finally { await new Promise(r => server.close(r)); }

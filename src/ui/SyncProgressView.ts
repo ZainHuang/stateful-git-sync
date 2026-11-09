@@ -1,4 +1,8 @@
 import { BUSINESS_STAGES, businessStage, type ActivitySnapshot } from '../product/SyncActivity';
+import type { PerformanceOperation } from '../product/SyncPerformance';
+const OPERATION_LABELS: Record<PerformanceOperation, string> = { 'Directory listing': '列目录', 'File metadata': '查文件信息', 'Content read': '读文件内容',
+  'Content hash': '内容哈希', 'Metadata hash': '元数据哈希', 'Index lookup': '索引查找', 'Change tracking': '记录变更',
+  'Index serialization': '索引序列化', 'Index persistence': '索引写入及读回', 'Transaction history': '历史事务读取' };
 
 /** One presentation of the existing events for Preview, execution and Activity.
  * Details stay closed by default and retain their open state across redraws. */
@@ -25,6 +29,11 @@ export class SyncProgressView {
     this.diagnostics = this.technical.createDiv();
   }
   setMessage(message: string) { this.message.setText(message); }
+  private metricTable(headers: string[], rows: string[][], extraClass = '') {
+    const table = this.diagnostics.createEl('table', { cls: `lms-performance-table ${extraClass}` });
+    const head = table.createEl('thead').createEl('tr'); headers.forEach(text => head.createEl('th', { text }));
+    const body = table.createEl('tbody'); rows.forEach(values => { const row = body.createEl('tr'); values.forEach(text => row.createEl('td', { text })); });
+  }
   render(a: ActivitySnapshot): void {
     if (!this.root.isConnected) return;
     const now = a.endedAt ?? Date.now(); const stage = businessStage(a.stage);
@@ -34,7 +43,7 @@ export class SyncProgressView {
     const verified = a.verified && !a.error && !a.pendingChanges;
     const count = a.processed !== undefined && a.total !== undefined ? `${a.processed} / ${a.total} files` : '';
     this.current.empty();
-    this.current.createEl('strong', { text: a.error ? '需要处理' : a.pendingChanges ? '有新的本地变更' : verified ? 'Verified' : a.stage ? stage : a.running ? BUSINESS_STAGES[0] : 'No activity in this session.' });
+    this.current.createEl('strong', { text: a.error ? '需要处理' : a.retrying ? '等待自动重试' : a.pendingChanges ? a.verified ? '本轮已同步，新的修改等待下一轮' : '有新的本地变更' : verified ? 'Verified' : a.stage ? stage : a.running ? BUSINESS_STAGES[0] : 'No activity in this session.' });
     if (count && a.running) this.current.createSpan({ text: count, cls: 'lms-muted' });
     const index = BUSINESS_STAGES.indexOf(stage);
     this.root.toggleClass('lms-sync-verified', verified);
@@ -63,13 +72,16 @@ export class SyncProgressView {
     }
     if (a.performance) {
       const metrics = a.performance;
-      const table = this.diagnostics.createEl('table', { cls: 'lms-performance-table' });
-      const head = table.createEl('thead').createEl('tr');
-      for (const text of ['Stage', 'ms', 'Files', 'Bytes', 'API']) head.createEl('th', { text });
-      const body = table.createEl('tbody');
-      for (const [stage, m] of Object.entries(metrics.stages)) {
-        const row = body.createEl('tr');
-        for (const text of [stage, m.elapsedMs.toFixed(1), String(m.files), String(m.bytes), String(m.apiRequests)]) row.createEl('td', { text });
+      this.metricTable(['Stage', 'ms', 'Files', 'Bytes', 'API'], Object.entries(metrics.stages).map(([stage, m]) =>
+        [stage, m.elapsedMs.toFixed(1), String(m.files), String(m.bytes), String(m.apiRequests)]));
+      if (metrics.operations) {
+        this.diagnostics.createEl('p', { text: metrics.previewOperations ? '操作明细（本轮预览 + 执行）' : '操作明细（当前检查或执行）', cls: 'lms-muted' });
+        this.metricTable(['操作', 'ms', '次数', '失败'], Object.entries(metrics.operations).map(([operation, m]) => {
+          const before = metrics.previewOperations?.[operation as PerformanceOperation];
+          return [OPERATION_LABELS[operation as PerformanceOperation] ?? operation, (m.elapsedMs + (before?.elapsedMs ?? 0)).toFixed(1),
+            String(m.calls + (before?.calls ?? 0)), String(m.failures + (before?.failures ?? 0))];
+        }), 'lms-operation-performance');
+        this.diagnostics.createEl('p', { text: '操作耗时包含等待，部分包含子项，不能直接相加。', cls: 'lms-muted' });
       }
       this.diagnostics.createEl('p', { text: `Reads ${metrics.localReads} · Hash ${metrics.hashBytes} bytes · Reused ${metrics.reusedHashes} · API ${metrics.apiRequests}`, cls: 'lms-muted' });
       if (metrics.reconciliations.length) this.diagnostics.createEl('p', { text: `Full reconciliation: ${metrics.reconciliations.join(', ')}`, cls: 'lms-muted' });

@@ -1,5 +1,5 @@
 import type { ActivityStage, ActivitySnapshot } from '../../product/SyncActivity';
-import { assertActive, PreviewError, readWithTimeout, safeError } from '../../errors';
+import { assertActive, isRetryableSyncError, PreviewError, readWithTimeout, safeError } from '../../errors';
 import { GitHubWriter, MAX_SYNC_FILE_BYTES, type PublishEvent } from '../../github/GitHubWriter';
 import { RemoteManifestReader, MAX_MANIFEST_BYTES } from '../../github/RemoteManifestReader';
 import { RemoteTreeReader } from '../../github/RemoteTreeReader';
@@ -33,7 +33,7 @@ import { RemoteMetadataCache } from '../../github/RemoteMetadataCache';
 import { changedVerificationPaths, recoveryHashes } from './VerificationScope';
 
 export interface SyncPreview extends StatefulPreviewResult { mode: SyncMode; adoptionChoice?: Resolution; canExecute: boolean; deletions: number; requiresDeleteConfirmation: boolean; scopeKey: string }
-interface Session { previewSteps: ActivitySnapshot['steps']; capture: Capture; execution: ExecutionPlan; options: PreviewOptions; manifest: SyncManifest | null; resolutions: Record<string, Resolution>; stateKey: string }
+interface Session { previewSteps: ActivitySnapshot['steps']; previewOperations?: ReturnType<SyncPerformance['snapshot']>['operations']; capture: Capture; execution: ExecutionPlan; options: PreviewOptions; manifest: SyncManifest | null; resolutions: Record<string, Resolution>; stateKey: string }
 const fail = (code: string, message: string) => new PreviewError('SYNC', code, message);
 const equalMap = (a: Record<string, string>, b: Record<string, string>) => Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([p, s]) => b[p] === s);
 
@@ -53,6 +53,10 @@ export class SyncService {
   }
   get running() { return !!this.busy; }
   get executing() { return this.busy === 'sync'; }
+  async retryableError(error: unknown): Promise<boolean> {
+    if (!isRetryableSyncError(error) || this.stopped) return false;
+    try { return !await this.transactions.active(); } catch { return false; }
+  }
   invalidateIndex(reason: string) { this.index?.invalidate(reason); this.remoteCache.clear(); }
   stop() { this.stopped = true; }
   private active() { if (this.stopped) throw fail('PLUGIN_UNLOADED', 'Plugin unloaded. Resume the journal after reopening Obsidian.'); }
@@ -85,6 +89,7 @@ export class SyncService {
       if (result.mode === 'SYNC' && result.canExecute && !result.plan.entries.some(entry => /^(PUSH|PULL)_/.test(entry.category))) {
         this.performance.verification(capture.local.verification === 'incremental' ? 'Incremental Verified' : 'Full Integrity Verified');
       }
+      this.session(result).previewOperations = this.performance.snapshot().operations;
       return result;
     }, 'preview');
   }
@@ -157,6 +162,7 @@ export class SyncService {
   async execute(preview: SyncPreview, token: string, progress: Progress = () => {}, signal?: AbortSignal, deleteConfirmation = ''): Promise<void> {
     return this.lock(async () => {
       const session = this.session(preview); const { execution: e, capture, options } = session;
+      this.performance.includePreview(session.previewOperations);
       this.performance.stage('Revalidate');
       this.observer?.activity?.({ type: 'stage', stage: 'Revalidate', completedSteps: session.previewSteps, generation: e.manifest.generation });
       const trusted = this.result(session);
@@ -165,7 +171,15 @@ export class SyncService {
       if (trusted.requiresDeleteConfirmation && deleteConfirmation !== `DELETE ${trusted.deletions}`) throw fail('DELETE_CONFIRMATION', `Type DELETE ${trusted.deletions} to approve this deletion count.`);
       if (await this.transactions.active()) throw recoveryError();
       if (JSON.stringify(this.state.current()) !== session.stateKey) throw fail('STATE_CHANGED', 'Metadata changed. Refresh Preview.');
-      await capture.verify(); assertActive(signal);
+      // Only ordinary, conflict-free uploads can detach from live local bytes.
+      // The existing content-addressed recovery store is the immutable batch.
+      // Downloads, explicit resolutions and scope/config changes retain the strict path.
+      const stableLocalPlan = !!this.index?.snapshot().trusted && e.mode === 'SYNC' && !Object.keys(session.resolutions).length
+        && equalMap(e.before, e.after)
+        && !e.plan.entries.some(entry => entry.category.startsWith('PUSH_') && [entry.path, entry.oldPath].some(path => path
+          && (path === '.gitignore' || path.startsWith(`${this.configDir}/`) || path.startsWith(`${STANDARD_CONFIG_DIRECTORY}/`))));
+      const uploadSnapshot = stableLocalPlan && e.plan.entries.some(entry => entry.category.startsWith('PUSH_'));
+      await capture.verify(stableLocalPlan); assertActive(signal);
       const github = new GitHubWriter(options, token, this.transport, this.performance);
       if (await github.head() !== capture.remote.remoteHeadSha) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
       const id = crypto.randomUUID();
@@ -194,7 +208,7 @@ export class SyncService {
       for (const sha of retained) {
         assertActive(signal); if (!staged.has(sha)) { await this.transactions.putBlob(id, await github.download(sha)); staged.add(sha); }
       }
-      await capture.verify();
+      if (uploadSnapshot) await capture.verifyScope(); else await capture.verify(stableLocalPlan);
       if (JSON.stringify(this.state.current()) !== session.stateKey) throw fail('STATE_CHANGED', 'Metadata changed. Refresh Preview.');
       if (await github.head() !== capture.remote.remoteHeadSha) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
       assertActive(signal);
@@ -211,7 +225,7 @@ export class SyncService {
         this.stage('Backup remote');
         progress('Creating and verifying GitHub backup ref');
         await github.backup(t.backupRef, t.originalHead);
-        await capture.verify();
+        if (uploadSnapshot) await capture.verifyScope(); else await capture.verify();
         if (await github.head() !== t.originalHead) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
       }
       const changed = !session.manifest || JSON.stringify(e.manifest) !== JSON.stringify(session.manifest);
@@ -244,7 +258,7 @@ export class SyncService {
         t.publication = { treeSha, events: [{ kind: 'commit-created', at: new Date().toISOString(), commit: t.commit }] };
         this.active();
         await this.transactions.save(t);
-        await capture.verify();
+        if (uploadSnapshot) await capture.verifyScope(); else await capture.verify();
         this.active();
         this.stage('Check candidate');
         await this.verifyRemoteCandidate(t, github);
@@ -256,7 +270,7 @@ export class SyncService {
       }
       this.active();
       t.phase = 'published'; await this.transactions.save(t);
-      await this.completeTransaction(t, github, e.scopeKey, progress, false, capture.local.verification !== 'incremental' || e.mode !== 'SYNC');
+      await this.completeTransaction(t, github, e.scopeKey, progress, false, capture.local.verification !== 'incremental' || e.mode !== 'SYNC', uploadSnapshot);
       this.sessions.delete(preview);
     });
   }
@@ -427,13 +441,13 @@ export class SyncService {
   }
   /** Manual/Auto execute await the full pipeline; Resume enters it only after
    * interruption. A durable active pointer is a checkpoint, not a user action. */
-  private async completeTransaction(t: SyncTransaction, github: GitHubWriter, scopeKey: string, progress: Progress, recovering = false, forceFull = true): Promise<void> {
+  private async completeTransaction(t: SyncTransaction, github: GitHubWriter, scopeKey: string, progress: Progress, recovering = false, forceFull = true, uploadSnapshot = false): Promise<void> {
     this.active();
     const stateKey = JSON.stringify(recovering ? this.state.current() : t.originalState);
     if (JSON.stringify(this.state.current()) !== stateKey) throw recoveryEnvironmentChanged();
-    // Only recovery of a publication with no local apply can use the published
-    // snapshot alone. Mixed/PULL transactions retain full local verification.
-    const publishedBaseOnly = recovering && equalMap(t.before, t.after);
+    // A frozen upload and push-only Recovery verify the published snapshot;
+    // later edits remain LOCAL against that BASE. Mixed/PULL keeps local verification.
+    const publishedBaseOnly = (recovering || uploadSnapshot) && equalMap(t.before, t.after);
     const requiresExactHead = !!t.adoptionChoice && (t.phase === 'prepared' || !publishedBaseOnly);
     if (t.adoptionChoice) {
       if (requiresExactHead && await github.head() !== t.commit) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed during adoption. BASE has not advanced; review recovery before a new Preview.');
@@ -503,7 +517,7 @@ export class SyncService {
     t.phase = 'complete'; await this.transactions.save(t);
     this.active();
     await this.transactions.clear();
-    if (!publishedBaseOnly) this.index?.completed();
+    if (!publishedBaseOnly || uploadSnapshot) this.index?.completed();
     this.stage('Complete');
     progress(`Verified · BASE generation ${t.manifest.generation}`);
   }

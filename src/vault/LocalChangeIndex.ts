@@ -34,11 +34,15 @@ export class LocalChangeIndex {
   private queue: Promise<void> = Promise.resolve();
   private savedRaw?: string;
   private writeRequested = false;
+  private immediateWrite = false;
   private writing = false;
+  private deferredWrite?: number;
+  private readonly dirtySets = new WeakMap<IndexTicket, ReadonlySet<string>>();
   private measurement?: SyncPerformance;
   measureWith(measurement: SyncPerformance) { this.measurement = measurement; }
   readonly policy: IndexPolicy;
-  constructor(private readonly storage: DeviceStateStorage, policy: Partial<IndexPolicy> = {}, private readonly now = () => Date.now()) {
+  constructor(private readonly storage: DeviceStateStorage, policy: Partial<IndexPolicy> = {}, private readonly now = () => Date.now(),
+    private readonly timerWindow: Pick<Window, 'setTimeout' | 'clearTimeout'> | undefined = typeof window === 'undefined' ? undefined : window) {
     this.policy = { ...DEFAULT_INDEX_POLICY, ...policy };
     if (!integer(this.policy.maxAgeMs) || this.policy.maxAgeMs < 1 || !integer(this.policy.auditEvery) || this.policy.auditEvery < 1 || !integer(this.policy.sampleSize)) throw new Error('Invalid audit policy');
   }
@@ -79,21 +83,32 @@ export class LocalChangeIndex {
   }
   invalidate(reason: string, persist = true) { this.trusted = false; this.reason = reason; this.epoch++; if (persist) this.persist(); }
   record(kind: 'create' | 'modify' | 'delete' | 'rename', path: string, oldPath?: string, retainIdentity = false): void {
-    try { assertPath(path); if (oldPath) assertPath(oldPath); }
-    catch { this.invalidate('invalid-file-event'); return; }
-    const revision = ++this.data.revision;
-    if (retainIdentity && kind !== 'modify') (this.data.identityEvents ??= []).push({ revision, kind, path, ...(oldPath ? { oldPath } : {}) });
-    const mark = (p: string) => { Object.defineProperty(this.data.dirty, p, { value: revision, writable: true, enumerable: true, configurable: true }); };
-    mark(path); if (oldPath) mark(oldPath);
-    for (const p of Object.keys(this.data.entries)) {
-      if (p.startsWith(`${path}/`)) mark(p);
-      if (oldPath && p.startsWith(`${oldPath}/`)) { mark(p); if (kind === 'rename') mark(path + p.slice(oldPath.length)); }
-    }
-    this.persist();
+    const finish = this.measurement?.operation('Change tracking');
+    try {
+      try { assertPath(path); if (oldPath) assertPath(oldPath); }
+      catch { this.invalidate('invalid-file-event'); return; }
+      const revision = ++this.data.revision;
+      if (retainIdentity && kind !== 'modify') (this.data.identityEvents ??= []).push({ revision, kind, path, ...(oldPath ? { oldPath } : {}) });
+      const mark = (p: string) => { Object.defineProperty(this.data.dirty, p, { value: revision, writable: true, enumerable: true, configurable: true }); };
+      mark(path); if (oldPath) mark(oldPath);
+      // A trusted indexed file has no descendants. Unknown paths and every
+      // directory/identity operation keep the existing descendant expansion.
+      if (kind !== 'modify' || !this.trusted || !Object.hasOwn(this.data.entries, path)) for (const p of Object.keys(this.data.entries)) {
+        if (p.startsWith(`${path}/`)) mark(p);
+        if (oldPath && p.startsWith(`${oldPath}/`)) { mark(p); if (kind === 'rename') mark(path + p.slice(oldPath.length)); }
+      }
+      this.persist(kind === 'modify');
+    } finally { finish?.(); }
   }
   identityEvents(): IdentityEvent[] { return structuredClone(this.data.identityEvents ?? []); }
   acknowledgeIdentity(revision: number) { this.data.identityEvents = (this.data.identityEvents ?? []).filter(e => e.revision !== revision); this.persist(); }
-  isDirty(ticket: IndexTicket, path: string) { return Object.keys(ticket.dirty).some(p => p === path || path.startsWith(`${p}/`)); }
+  isDirty(ticket: IndexTicket, path: string) {
+    let dirty = this.dirtySets.get(ticket);
+    if (!dirty) { dirty = new Set(Object.keys(ticket.dirty)); this.dirtySets.set(ticket, dirty); }
+    if (dirty.has(path)) return true;
+    for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/', slash - 1)) if (dirty.has(path.slice(0, slash))) return true;
+    return false;
+  }
   ticket(scopeKey: string, forceFull = false): IndexTicket {
     if (this.data.scopeKey !== scopeKey) this.invalidate(this.trusted ? 'ignore-scope-changed' : this.reason, false);
     if (this.trusted && (this.now() < this.data.fullAt || this.now() - this.data.fullAt >= this.policy.maxAgeMs || this.data.cycles >= this.policy.auditEvery - 1)) this.invalidate('scheduled-integrity-audit', false);
@@ -112,7 +127,8 @@ export class LocalChangeIndex {
   }
   async accept(ticket: IndexTicket, entries: IndexedFile[]): Promise<void> {
     this.assertCurrent(ticket);
-    if (!ticket.full && !Object.keys(this.data.dirty).length && JSON.stringify(this.data.entries) === JSON.stringify(Object.fromEntries(entries.map(e => [e.path, e])))) return;
+    const unchanged = () => JSON.stringify(this.data.entries) === JSON.stringify(Object.fromEntries(entries.map(e => [e.path, e])));
+    if (!ticket.full && !Object.keys(this.data.dirty).length && (this.measurement?.timeSync('Index serialization', unchanged) ?? unchanged())) return;
     this.data.entries = Object.fromEntries(entries.map(e => [e.path, e])); this.data.scopeKey = ticket.scopeKey;
     for (const [path, revision] of Object.entries(this.data.dirty)) if (revision <= ticket.revision) delete this.data.dirty[path];
     if (ticket.full) { this.data.fullAt = this.now(); this.data.cycles = 0; this.data.cursor = 0; }
@@ -122,20 +138,40 @@ export class LocalChangeIndex {
   }
   completed() { this.data.cycles++; this.persist(); }
   matches(entry: IndexedFile, stat: FileStat | null) { return !!stat && stat.type === 'file' && entry.size === stat.size && entry.mtime === stat.mtime && entry.ctime === stat.ctime; }
-  private persist() {
+  private persist(defer = false) {
     this.writeRequested = true;
+    // A fixed window from the first edit cannot be postponed by continuous
+    // typing. Identity/state writes and flush() bypass the window entirely.
+    if (defer && this.timerWindow) {
+      if (!this.immediateWrite && this.deferredWrite === undefined) this.deferredWrite = this.timerWindow.setTimeout(() => { this.deferredWrite = undefined; this.persist(); }, 100);
+      return;
+    }
+    if (this.deferredWrite !== undefined) { this.timerWindow?.clearTimeout(this.deferredWrite); this.deferredWrite = undefined; }
+    this.immediateWrite = true;
     if (this.writing) return;
     this.writing = true;
     this.queue = this.queue.then(async () => {
       try {
-        while (this.writeRequested) {
-          this.writeRequested = false;
-          const payload = JSON.stringify(this.data); const raw = JSON.stringify({ payload, sha: gitBlobSha(new TextEncoder().encode(payload), this.measurement, true) });
-          try { await this.storage.write(raw); if (await this.storage.read() !== raw) throw new Error(); this.savedRaw = raw; }
-          catch { this.invalidate('index-storage-failed', false); }
+        while (this.writeRequested && this.immediateWrite) {
+          this.writeRequested = false; this.immediateWrite = false;
+          const finish = this.measurement?.operation('Index persistence'); let failed = true;
+          try {
+            const payload = this.measurement?.timeSync('Index serialization', () => JSON.stringify(this.data)) ?? JSON.stringify(this.data);
+            const sha = gitBlobSha(new TextEncoder().encode(payload), this.measurement, true);
+            const envelope = () => JSON.stringify({ payload, sha });
+            const raw = this.measurement?.timeSync('Index serialization', envelope) ?? envelope();
+            await this.storage.write(raw); if (await this.storage.read() !== raw) throw new Error(); this.savedRaw = raw; failed = false;
+          } catch { this.invalidate('index-storage-failed', false); }
+          finally { finish?.(failed); }
         }
       } finally { this.writing = false; }
     });
   }
-  async flush(): Promise<void> { let pending; do { pending = this.queue; await pending; } while (pending !== this.queue); }
+  async flush(): Promise<void> {
+    let pending;
+    do {
+      if (this.deferredWrite !== undefined || this.writeRequested && !this.writing) this.persist();
+      pending = this.queue; await pending;
+    } while (pending !== this.queue || this.writeRequested || this.deferredWrite !== undefined);
+  }
 }

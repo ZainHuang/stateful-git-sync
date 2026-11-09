@@ -49,6 +49,9 @@ export class TransactionStore {
   /** Historical path hints only, never file-deletion or BASE authority. Old
    * completed journals let upgrades clean folders left by earlier executors. */
   async completedFolderSources(current: SyncTransaction): Promise<SyncTransaction[]> {
+    return this.measurement ? this.measurement.time('Transaction history', () => this.readCompletedFolderSources(current)) : this.readCompletedFolderSources(current);
+  }
+  private async readCompletedFolderSources(current: SyncTransaction): Promise<SyncTransaction[]> {
     const result: SyncTransaction[] = [];
     const listing = await this.vault.list(ROOT);
     for (const folder of listing.folders) {

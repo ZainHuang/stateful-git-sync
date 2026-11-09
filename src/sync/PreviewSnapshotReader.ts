@@ -36,7 +36,21 @@ export class PreviewSnapshotReader {
     if (local.verification === 'full') this.remoteCache?.clear();
     stage('Read remote');
     const remote = await new RemoteTreeReader(client, this.remoteCache).read(options.branch, progress, signal);
-    const verify = async () => {
+    const verifyScope = async () => {
+      if (gitignore !== await this.readGitignore()) throw new PreviewError('LOCAL_SCAN', 'LOCAL_CHANGED', 'Ignore rules changed. Run Preview again.');
+      assertActive(signal);
+    };
+    let watermark = local.indexWatermark;
+    const verify = async (reuseIndex = false) => {
+      const current = this.index?.snapshot();
+      // The initial Preview still reconciles full inventories. A later pure-upload
+      // checkpoint may reuse that proof only while its exact event epoch/revision
+      // survives. Keep the scanner ticket, not a watermark sampled after disk IO:
+      // an event during index persistence must remain a later change.
+      if (reuseIndex && local.verification === 'incremental' && current?.trusted && watermark
+        && current.revision === watermark.revision && current.epoch === watermark.epoch) {
+        await verifyScope(); return;
+      }
       progress('Rechecking local content for changes');
       // Initial Scan and final Verify reconcile metadata. These checkpoints use
       // the live event watermark plus complete inventories and dirty byte reads.
@@ -48,8 +62,9 @@ export class PreviewSnapshotReader {
         throw new PreviewError('LOCAL_SCAN', 'LOCAL_CHANGED', 'Vault or ignore rules changed during Preview. Run Preview again.');
       }
       if (checked.verification === 'full') local.verification = 'full';
+      watermark = checked.indexWatermark;
       assertActive(signal);
     };
-    return { client, local, remote, ignore, gitignore, verify };
+    return { client, local, remote, ignore, gitignore, verify, verifyScope };
   }
 }

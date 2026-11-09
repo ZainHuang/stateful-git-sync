@@ -19,6 +19,7 @@ export interface LocalSnapshot {
   protectedDirectories: string[];
   scannedAt: string;
   verification?: 'incremental' | 'full';
+  indexWatermark?: { revision: number; epoch: number };
 }
 export type FileProgress = (processed: number, total: number) => void;
 export type Progress = (message: string) => void;
@@ -31,7 +32,7 @@ export class LocalScanError extends PreviewError {
 }
 
 export class VaultScanner {
-  constructor(private readonly reader: VaultReader, private readonly measurement?: HashMeasurement & Partial<Pick<SyncPerformance, 'reused' | 'reconcile'>>) {}
+  constructor(private readonly reader: VaultReader, private readonly measurement?: HashMeasurement & Partial<Pick<SyncPerformance, 'reused' | 'reconcile' | 'timeSync'>>) {}
 
   private async inventory(ignore: IgnoreService, signal?: AbortSignal): Promise<{ paths: string[]; protectedDirectories: string[] }> {
     const paths: string[] = [];
@@ -69,14 +70,19 @@ export class VaultScanner {
       const files: LocalFile[] = [];
       const ignored: IgnoredFile[] = [];
       const issues: ScanIssue[] = [];
-      const eligible = (path: string) => !ignore.reason(path) && !excludedPaths.includes(path);
+      const excluded = new Set(excludedPaths); const forced = new Set(cache?.forcePaths);
+      const eligible = (path: string) => !ignore.reason(path) && !excluded.has(path);
       const total = inventory.paths.filter(eligible).length;
       const paths = inventory.paths.filter(eligible);
       const index = cache?.index;
       let ticket = cache ? index!.ticket(JSON.stringify([cache.scopeKey, [...excludedPaths].sort(pathOrder)]), cache.forceFull) : undefined;
       const stats = new Map<string, FileStat | null>();
       if (ticket && !ticket.full) {
-        let unobserved = [...new Set([...paths, ...Object.keys(ticket.entries)])].some(path => !index!.isDirty(ticket!, path) && paths.includes(path) !== Object.hasOwn(ticket!.entries, path));
+        const unobservedPaths = () => {
+          const present = new Set(paths);
+          return [...new Set([...paths, ...Object.keys(ticket!.entries)])].some(path => !index!.isDirty(ticket!, path) && present.has(path) !== Object.hasOwn(ticket!.entries, path));
+        };
+        let unobserved = this.measurement?.timeSync?.('Index lookup', unobservedPaths) ?? unobservedPaths();
         for (const path of paths) {
           assertActive(signal);
           let stat: FileStat | null;
@@ -88,7 +94,8 @@ export class VaultScanner {
         if (unobserved) { index!.invalidate('unobserved-file-event'); ticket = index!.ticket(ticket.scopeKey); }
       }
       if (ticket?.full && ticket.reason) this.measurement?.reconcile?.(ticket.reason);
-      const samples = new Set(cache?.audit && ticket ? index!.samples(ticket, paths.filter(p => !index!.isDirty(ticket, p))) : []);
+      const auditSamples = () => cache?.audit && ticket ? index!.samples(ticket, paths.filter(p => !index!.isDirty(ticket, p))) : [];
+      const samples = new Set(this.measurement?.timeSync?.('Index lookup', auditSamples) ?? auditSamples());
       const indexed: IndexedFile[] = [];
       fileProgress?.(0, total);
       const read = async (path: string): Promise<LocalFile | undefined> => {
@@ -106,10 +113,11 @@ export class VaultScanner {
       };
       for (const path of inventory.paths) {
         assertActive(signal);
-        const reason = ignore.reason(path) ?? (excludedPaths.includes(path) ? 'SyncPlan identity exclusion' : undefined);
+        const reason = ignore.reason(path) ?? (excluded.has(path) ? 'SyncPlan identity exclusion' : undefined);
         if (reason) { ignored.push({ path, reason }); continue; }
         const stored = ticket?.entries[path];
-        const reuse = !!stored && !ticket!.full && !index!.isDirty(ticket!, path) && !samples.has(path) && !cache?.forcePaths?.includes(path) && index!.matches(stored, stats.get(path) ?? null);
+        const canReuse = () => !!stored && !ticket!.full && !index!.isDirty(ticket!, path) && !samples.has(path) && !forced.has(path) && index!.matches(stored, stats.get(path) ?? null);
+        const reuse = !!stored && (this.measurement?.timeSync?.('Index lookup', canReuse) ?? canReuse());
         const file = reuse ? { path, size: stored.size, sha: stored.sha } : await read(path);
         if (reuse) { indexed.push(stored); this.measurement?.reused?.(); }
         if (samples.has(path) && stored && file && file.sha !== stored.sha) {
@@ -136,7 +144,8 @@ export class VaultScanner {
       if (issues.length) throw new LocalScanError(issues.some(d => d.problem === 'unreadable') ? 'READ_FAILED' : 'LOCAL_CHANGED',
         [...new Map(issues.map(d => [d.path, d])).values()], files);
       if (ticket) await index!.accept(ticket, indexed);
-      return { files, ignored, protectedDirectories: inventory.protectedDirectories, scannedAt: new Date().toISOString(), ...(ticket ? { verification: ticket.full ? 'full' as const : 'incremental' as const } : {}) };
+      return { files, ignored, protectedDirectories: inventory.protectedDirectories, scannedAt: new Date().toISOString(),
+        ...(ticket ? { verification: ticket.full ? 'full' as const : 'incremental' as const, indexWatermark: { revision: ticket.revision, epoch: ticket.epoch } } : {}) };
     } catch (error) {
       if (error instanceof PreviewError) throw error;
       throw new PreviewError('LOCAL_SCAN', 'READ_FAILED', 'A file or directory could not be read. No partial plan was created.');

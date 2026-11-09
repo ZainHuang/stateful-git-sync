@@ -31,7 +31,11 @@ export class ActivityPanel extends Modal {
     this.heading?.toggleClass('lms-hidden', a.running || a.verified && !a.error);
     this.contentEl.querySelectorAll<HTMLButtonElement>('.lms-device-actions button').forEach(b => { b.disabled = a.running && b.textContent !== 'Dashboard'; });
     const error = a.error ?? cache.auto.reason;
-    this.error?.setText(error ? `Recent error / review: ${error}` : '');
+    const retrying = !!a.retrying && !a.error;
+    this.error?.setText(error ? `${retrying ? '等待自动重试' : 'Recent error / review'}: ${error}` : '');
+    this.error?.setAttribute('role', retrying ? 'status' : 'alert');
+    this.error?.toggleClass('lms-warning', !retrying);
+    this.error?.toggleClass('lms-muted', retrying);
     this.error?.toggleClass('lms-hidden', !error);
     this.flow?.render(a);
   }

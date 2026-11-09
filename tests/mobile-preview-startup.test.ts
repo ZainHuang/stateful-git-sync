@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from 'obsidian';
 import LocalMirrorSyncPlugin from '../src/main';
-import { safeError } from '../src/errors';
+import { PreviewError, safeError } from '../src/errors';
 import type { Progress } from '../src/vault/VaultScanner';
 import { target } from './helpers';
 
@@ -51,6 +51,16 @@ async function setup() {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('Android Preview startup events', () => {
+  it('ignores content-only edits outside the sync scope while retaining ignored-file identity events', async () => {
+    const a = await setup(); a.plugin.settings.ignorePatterns = '/02_工作空间/';
+    a.listeners.get('modify')?.({ path: '02_工作空间/笔记.md' }); await a.drain();
+    expect(a.write).not.toHaveBeenCalled(); expect(a.plugin.product.revision).toBe(0);
+    const file = { fileId: 'ignored', path: '02_工作空间/笔记.md', deleted: false };
+    await a.plugin.syncState.save({ ...a.plugin.syncState.current(), localFiles: { [file.fileId]: file } });
+    a.listeners.get('rename')?.({ path: '02_工作空间/改名.md' }, '02_工作空间/笔记.md'); await a.drain();
+    expect(a.plugin.syncState.current().localFiles![file.fileId]?.path).toBe('02_工作空间/改名.md');
+    expect(a.plugin.product.revision).toBe(0); a.plugin.onunload();
+  });
   it('does not enqueue identity/cache writes for existing files announced during Vault startup', async () => {
     const a = await setup(); const before = a.plugin.syncState.current();
     for (let n = 0; n < 100; n++) a.listeners.get('create')?.({ path: `existing/${n}.md` });
@@ -79,6 +89,17 @@ describe('Android Preview startup events', () => {
 });
 
 describe('Preview preflight waits', () => {
+  it('queues a recoverable manual Preview error without disabling automatic sync or retaining Error', async () => {
+    const a = await setup(); vi.useFakeTimers(); a.plugin.settings.autoSync = true;
+    const preview = vi.spyOn(a.plugin.sync, 'preview').mockRejectedValue(new PreviewError('LOCAL_SCAN', 'LOCAL_CHANGED', 'Editing during Preview'));
+    a.plugin.openPreview(); await a.pending.previewModal.pending;
+    expect(a.plugin.settings.autoSync).toBe(true);
+    expect(a.plugin.product.snapshot().auto).toMatchObject({ result: 'Waiting to retry', scheduledAt: Date.now() + 30000 });
+    expect(a.plugin.product.activitySnapshot()).toMatchObject({ running: false, retrying: true });
+    expect(a.plugin.product.activitySnapshot().error).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(30000); expect(preview).toHaveBeenCalledTimes(2);
+    expect(a.plugin.product.snapshot().auto.result).toBe('Waiting to retry'); a.plugin.onunload();
+  });
   it('identifies and times out pending local metadata without bypassing the queue or starting sync', async () => {
     const a = await setup(); vi.useFakeTimers();
     const saving = new Promise(() => {}); a.pending.metadataPending = saving;

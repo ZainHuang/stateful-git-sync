@@ -8,7 +8,7 @@ export async function indexedDevice(files: Record<string, string> = {}, remote =
   const vault = new WritableVault(files);
   const state = new LocalStateStore({ read: () => vault.readInternal('state'), write: s => vault.writeInternal('state', s) }); await state.load();
   const storage = { read: () => vault.readInternal('index'), write: (s: string) => vault.writeInternal('index', s) };
-  const index = new LocalChangeIndex(storage, policy); await index.load();
+  const index = new LocalChangeIndex(storage, policy, undefined, globalThis); await index.load();
   const service = new SyncService(vault, remote.transport, '.obsidian', state, undefined, index);
   const edit = (path: string, content: string) => { vault.files.set(path, bytes(content)); index.record('modify', path); };
   const remove = async (path: string) => { vault.files.delete(path); index.record('delete', path); await state.recordDelete(path); };

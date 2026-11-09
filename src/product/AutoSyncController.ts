@@ -1,4 +1,4 @@
-import { PreviewError, safeError } from '../errors';
+import { isRetryableSyncError, PreviewError, safeError } from '../errors';
 import type { Settings } from '../settings/settings';
 import type { SyncPreview } from '../sync/execution/SyncService';
 
@@ -9,9 +9,10 @@ interface AutoHost {
   check(): Promise<{ preview: SyncPreview; block?: string }>;
   execute(preview: SyncPreview): Promise<void>;
   status(status: AutoStatus): unknown;
+  retryError(error: unknown): Promise<boolean>;
 }
 
-/** Event-driven, single-flight scheduling. No polling or automatic recovery/resolution. */
+/** Single-flight scheduling with delayed retries, never automatic recovery/resolution. */
 export class AutoSyncController {
   private timer?: number;
   private stopped = false;
@@ -23,6 +24,12 @@ export class AutoSyncController {
     private readonly timerWindow: Pick<Window, 'setTimeout' | 'clearTimeout'> = window) {
     if (initial) this.state = { ...initial };
     this.manual = initial?.result === 'Manual confirmation required';
+    const saved = initial?.reason?.match(/^([^·]+) · ([A-Z0-9_]+): ([\s\S]*)$/);
+    const transient = saved && isRetryableSyncError(new PreviewError(saved[1]!, saved[2]!, saved[3]!));
+    if (initial?.result === 'Waiting to retry' || transient && (this.manual || initial?.result === 'Offline')) {
+      this.manual = false; this.pending = true; this.state.result = 'Waiting to retry';
+      if (this.host.settings().autoSync) this.schedule();
+    }
   }
   changed(): void {
     if (this.stopped || !this.host.settings().autoSync || this.manual) return;
@@ -40,12 +47,23 @@ export class AutoSyncController {
   }
   configure(): void {
     this.timerWindow.clearTimeout(this.timer);
+    if (!this.host.settings().autoSync && this.state.result === 'Waiting to retry') {
+      this.state.result = 'Waiting for changes'; this.state.reason = undefined;
+    }
     this.state.scheduledAt = undefined; this.reportSchedule();
     if (this.host.settings().autoSync && this.pending && !this.manual) this.schedule();
   }
   reviewed(): void {
     this.manual = false; this.state.result = 'Waiting for changes'; this.state.reason = undefined;
     void Promise.resolve(this.host.status({ ...this.state })).catch(() => { this.manual = true; });
+  }
+  async retry(error: unknown): Promise<boolean> {
+    if (this.stopped || !this.host.settings().autoSync || !isRetryableSyncError(error) || !await this.host.retryError(error)) return false;
+    if (this.stopped || !this.host.settings().autoSync) return false;
+    this.manual = false; this.pending = true;
+    this.state.result = 'Waiting to retry'; this.state.reason = safeError(error);
+    if (!this.running) this.schedule();
+    return true;
   }
   stop(): void { this.stopped = true; this.pending = false; this.timerWindow.clearTimeout(this.timer); this.state.scheduledAt = undefined; this.reportSchedule(); }
   async run(): Promise<void> {
@@ -68,10 +86,9 @@ export class AutoSyncController {
         this.state.result = 'Verified'; this.state.lastSyncAt = new Date().toISOString();
       }
     } catch (error) {
-      const offline = error instanceof PreviewError && /^(HTTP_|NETWORK)/.test(error.code);
-      this.manual = !offline;
-      this.state.result = offline ? 'Offline' : 'Manual confirmation required';
-      this.state.reason = safeError(error);
+      if (!await this.retry(error)) {
+        this.manual = true; this.state.result = 'Manual confirmation required'; this.state.reason = safeError(error);
+      }
     } finally {
       this.running = false;
       // A reporting failure must never start an unhandled background rejection.

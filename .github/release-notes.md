@@ -1,30 +1,19 @@
-Stateful Git Sync **1.2.0** adds incremental sync and smart verification to the existing Three-Way Sync executor. Daily sync reads dirty files and a rotating integrity sample, reuses verified unchanged hashes, and caches validated immutable Commit/Tree/Manifest metadata. Remote branch HEAD is still checked freshly for concurrency.
+Stateful Git Sync **1.2.1** improves editing during synchronization and keeps automatic sync retryable after temporary failures.
 
-**Incremental Verified** strictly verifies changed bytes, deletion/rename results, remote metadata and BASE read-back. **Full Integrity Verified** additionally audits every eligible local file. Initialization, plugin restart, mobile resume, untrusted or damaged caches, scope changes, standalone Verify and Recovery with local writes require full reconciliation. Full audits also run after 24 hours or 20 sync cycles. Missed events with unchanged size/timestamps are detected by rotating byte samples and scheduled full audits, rather than treating metadata as permanent content proof.
+### Changes
 
-Sync events received during execution remain dirty for the next review. Verification failure retains Recovery and the previous BASE. Existing conflict choices, Tombstones, safe deletion, atomic GitHub publication and `force:false` remain in place; Manifest semantics and the sync executor are preserved.
+- Eligible, conflict-free uploads publish a verified frozen snapshot. Edits made after staging stay local and are queued for a later sync. Changes during the initial scan may still require a fresh Preview.
+- When no transaction is pending, automatic sync retries recoverable local-change errors, temporary network failures, timeouts and supported rate-limit or server errors after the configured delay. The activity view shows the retry countdown, including after a restart when a retry was pending.
+- Ordinary content edits excluded by the plugin's Ignore Patterns do not invalidate an eligible scan. Create, delete and rename events remain tracked for file identity history.
+- Index lookups and ordinary index writes are more efficient. Technical details now show operation-level timings for Preview and execution.
+- Downloads, conflicts, deletion thresholds and pending Recovery retain their existing safeguards and review requirements. Automatic retry does not resolve conflicts or resume a retained transaction.
 
-The panel and corner activity indicator share the existing status events. Default progress is **检查差异 → 同步文件 → 安全校验** (check differences → sync files → safety verification), with actual file counts and elapsed time. Technical stages and diagnostics expand on demand. Completed sync shows a static verification result; subsequent edits reset the live status to pending changes.
+### Validation and upgrade
 
-### Performance evidence
+TypeScript, both lint configurations, the project test suite, property tests, the mobile-compatible build and the public-content audit were run before release. An isolated Windows Obsidian test used a local GitHub fixture to check snapshot uploads, queued edits, retry, Recovery protection and desktop/mobile-sized layouts. Mobile layouts were emulated; physical iOS and Android devices and a live notes repository were not part of this release validation.
 
-Three sequential paired runs used a synthetic 540-file disk Vault (500 Markdown files and 40 attachments), the production SyncService and a local HTTP GitHub fixture. Values below are medians; they are not live GitHub or physical-phone timings.
+Update through Community plugins, or replace `main.js`, `manifest.json` and `styles.css` in the existing `local-mirror-sync` plugin folder. Preserve settings, BASE and pending Recovery. The first check after reload performs full reconciliation.
 
-| Scenario | Before → 1.2.0, ms | Content/payload hash bytes | Content reads | API requests |
-| --- | ---: | ---: | ---: | ---: |
-| Initialization | 2,988.7 → 3,702.5 | 64,888,414 → 38,997,094 | 3,780 → 1,620 | 561 → 557 |
-| No changes | 2,288.5 → 403.8 | 51,782,640 → 524,288 | 3,240 → 8 | 12 → 6 |
-| Edit 1 file | 2,612.8 → 666.3 | 58,446,538 → 753,801 | 3,780 → 11 | 24 → 17 |
-| Edit 10 files | 2,646.6 → 703.9 | 58,725,369 → 1,378,557 | 3,780 → 38 | 42 → 35 |
-| Rename 25 files | 3,135.4 → 771.0 | 58,802,264 → 2,032,302 | 3,780 → 83 | 47 → 40 |
-| Mixed Push/Pull Recovery | 520.8 → 625.8 | 6,465,409 → 6,465,409 | 541 → 541 | 7 → 7 |
+### 中文说明
 
-Daily scenarios reduced elapsed time by **73.4–82.4%**. Initialization increased **23.9%** and full Recovery increased **20.2%**; both retain full verification. Hash counts cover instrumented content and upload payloads; internal metadata checksum accounting is separate and is not directly comparable with the old baseline.
-
-### Validation and installation
-
-All **825 tests**, TypeScript, standard and Obsidian lint, the mobile-safe build and the dedicated **100-case property suite** passed locally. Nineteen isolated real Windows Obsidian suites passed **112 checks** with zero captured Console errors. iOS/Android viewport, keyboard and lifecycle checks use desktop emulation; physical devices and live notes-repository sync remain unverified. Tests did not modify a personal Vault.
-
-Update by disabling the plugin and replacing `main.js`, `manifest.json` and `styles.css` in the existing `local-mirror-sync` plugin folder, then enable it. Preserve settings, BASE and pending Recovery. The first sync after reload performs full reconciliation.
-
-中文：V1.2 新增持久化变更索引、可信 Hash/远端元数据复用和智能验证，日常仅读取变化文件与轮换审计样本。界面默认显示「检查差异 → 同步文件 → 安全校验」，技术过程可展开。明确区分增量验证与全量完整性验证；初始化、重启、移动端恢复、缓存异常及需要本地写入的 Recovery 回退全量。540 文件隔离基准中日常同步耗时降低 73.4–82.4%；初始化和完整 Recovery 耗时分别增加 23.9% 与 20.2%。保留现有冲突、删除、Manifest、BASE 和恢复安全规则。
+**1.2.1** 为符合条件的无冲突上传使用已验证的冻结快照；快照准备后的本地编辑保留并进入后续同步。没有待恢复事务时，扫描期间的本地变化、临时网络故障、超时及受支持的限流或服务端错误，会按自动同步间隔重试，面板显示倒计时。忽略规则排除的普通内容编辑不会干扰当前扫描；文件身份相关的新增、删除、重命名事件仍会记录。下载、冲突、删除阈值和待恢复事务继续使用原有保护。

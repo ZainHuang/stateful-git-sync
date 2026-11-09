@@ -88,7 +88,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
           const preview = await this.sync.preview(this.syncOptions(), this.tokens.read(settings));
           this.autoSettings.set(preview, JSON.stringify(settings));
           return { preview, block: this.sync.autoBlock(preview, settings) };
-        } catch (error) { await this.recordFailure(error); throw error; }
+        } catch (error) { if (!await this.sync.retryableError(error)) await this.recordFailure(error); throw error; }
       },
       execute: async preview => {
         await this.metadataPending;
@@ -97,10 +97,11 @@ export default class LocalMirrorSyncPlugin extends Plugin {
         const block = this.sync.autoBlock(preview, this.settings);
         if (block) throw new PreviewError('AUTO', 'MANUAL_REQUIRED', block);
         try { await this.sync.execute(preview, this.tokens.read(this.settings)); }
-        catch (error) { await this.recordFailure(error); throw error; }
+        catch (error) { if (!await this.sync.retryableError(error)) await this.recordFailure(error); throw error; }
         finally { this.queueIdentityUpdates(); await this.metadataPending; }
       },
       status: status => this.product.auto(status),
+      retryError: error => this.sync.retryableError(error),
     }, this.product.snapshot().auto);
     try { if (this.stateError || await this.sync.transactions.active()) await this.product.failure(this.stateError, true); }
     catch (error) { await this.recordFailure(error); }
@@ -116,6 +117,9 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     const observe = (kind: 'create' | 'modify' | 'delete' | 'rename', path: string, oldPath?: string) => {
       const protection = new IgnoreService({ configDir: this.app.vault.configDir, includeObsidian: true, patterns: '', gitignore: '' });
       if (protection.protectedReason(path) && (!oldPath || protection.protectedReason(oldPath))) return;
+      // Ignored content edits cannot stale an eligible snapshot. Identity
+      // events below remain recorded for a later sync-scope review.
+      if (kind === 'modify' && !userPath(path)) return;
       this.changeIndex.record(kind, path, oldPath, identityPath(path) && (!oldPath || identityPath(oldPath)));
       this.queueIdentityUpdates();
       if (userPath(path) || oldPath && userPath(oldPath)) dirty();
@@ -167,6 +171,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     return { owner, repository, branch, includeObsidian, ignorePatterns, deleteSafetyThreshold };
   }
   private async recordFailure(error: unknown): Promise<void> {
+    if (await this.auto?.retry(error)) { this.reviewing = false; return; }
     let recovery = !!this.stateError;
     try { recovery ||= !!await this.sync.transactions.active(); } catch { recovery = true; }
     try { await this.product.failure(error, recovery); } catch (e) { this.productError = e; this.refreshDashboard(); }
@@ -381,5 +386,8 @@ export default class LocalMirrorSyncPlugin extends Plugin {
     modal.open();
   }
 
-  onunload(): void { this.unloaded = true; window.clearInterval(this.activityClock); this.activityPanel?.close(); this.auto?.stop(); this.sync?.stop(); this.previewModal?.close(); this.recoveryModal?.close(); }
+  onunload(): void {
+    void this.changeIndex?.flush().catch(() => this.changeIndex.invalidate('index-storage-failed', false));
+    this.unloaded = true; window.clearInterval(this.activityClock); this.activityPanel?.close(); this.auto?.stop(); this.sync?.stop(); this.previewModal?.close(); this.recoveryModal?.close();
+  }
 }

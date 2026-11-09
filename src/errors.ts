@@ -5,6 +5,12 @@ export class PreviewError extends Error {
   }
 }
 
+/** A fresh Preview can resolve these failures; a retained transaction still needs recovery. */
+export function isRetryableSyncError(error: unknown): error is PreviewError {
+  return error instanceof PreviewError
+    && /^(LOCAL_CHANGED|REMOTE_HEAD_CHANGED|READ_TIMEOUT|NETWORK_(ERROR|TIMEOUT|UNCERTAIN)|HTTP_(408|429|5\d{2}))$/.test(error.code);
+}
+
 // Never surface transport errors: they may contain Authorization headers or bodies.
 export function safeError(error: unknown): string {
   return error instanceof PreviewError

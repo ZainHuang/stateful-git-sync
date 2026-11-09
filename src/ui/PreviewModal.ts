@@ -218,7 +218,7 @@ export class PreviewModal extends Modal {
         try {
           await this.actions!.execute(prepared, text => { this.flow?.setMessage(text); this.renderActivity(); }, this.controller!.signal, confirmation);
           this.header();
-          this.contentEl.createEl('p', { text: 'Sync verified. BASE updated successfully.', cls: 'lms-status' });
+          this.contentEl.createEl('p', { text: this.activity?.().pendingChanges ? '本轮快照已同步，新的修改已保留，等待下一轮同步。' : 'Sync verified. BASE updated successfully.', cls: 'lms-status' });
           this.flow = new SyncProgressView(this.contentEl); this.renderActivity();
           this.contentEl.createEl('button', { text: 'Preview again' }).onclick = () => { void this.load(); };
         } catch (error) {

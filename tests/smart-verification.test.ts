@@ -11,12 +11,13 @@ describe('V1.2 verification, publication and BASE safety', () => {
     expect(calls.some(c => c.resource.startsWith('ref/'))).toBe(true);
     expect(calls.some(c => c.resource.startsWith('trees/') || c.resource.startsWith('blobs/') || c.resource.startsWith('commits/'))).toBe(false);
   });
-  it('does not advance BASE on incremental verify failure; keeps exact diagnostics and Recovery', async () => {
+  it('advances only the published snapshot BASE and retains subsequent local edits for the next batch', async () => {
     const a = await indexedDevice({ 'A.md': 'a', 'B.md': 'b' }); await a.run(); const base = a.state.current().baseRemoteCommit;
     a.edit('A.md', 'reviewed'); const p = await a.service.preview(v12Options, 'fixture');
     a.remote.beforePatch = () => a.edit('B.md', 'concurrent');
-    await expect(a.service.execute(p, 'fixture')).rejects.toMatchObject({ code: 'LOCAL_VERIFY_FAILED', diagnostics: expect.arrayContaining([expect.objectContaining({ path: 'B.md' })]) });
-    expect(a.state.current().baseRemoteCommit).toBe(base); expect(await a.service.transactions.active()).not.toBeNull();
+    await a.service.execute(p, 'fixture');
+    expect(a.state.current().baseRemoteCommit).not.toBe(base); expect(await a.service.transactions.active()).toBeNull();
+    expect(a.remote.text('B.md')).toBe('b'); expect(a.vault.files.get('B.md')).toEqual(bytes('concurrent'));
     expect(a.index.snapshot().dirtyPaths).toContain('B.md');
   });
   it('fully verifies local-write Recovery after a lost publication without a second business commit', async () => {
