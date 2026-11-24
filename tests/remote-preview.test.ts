@@ -100,6 +100,45 @@ describe('RemoteTreeReader', () => {
 });
 
 describe('Full read-only Preview', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('times out a stalled branch check before scanning and reuses the ref on successful retry', async () => {
+    vi.useFakeTimers();
+    const vault = new MemoryVault({ 'a.md': 'A' });
+    const stat = vi.spyOn(vault, 'stat');
+    const calls: GetRequest[] = [];
+    const base = remoteTransport([], calls);
+    let finish!: (response: Awaited<ReturnType<GetTransport>>) => void;
+    const transport = vi.fn<GetTransport>().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockImplementation(base);
+    const service = new PreviewService(vault, transport, '.obsidian');
+    const outcome = vi.fn();
+    const pending = service.preview(options, 'test').then(value => outcome(value), error => outcome(safeError(error)));
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(outcome).not.toHaveBeenCalled();
+    expect(stat).not.toHaveBeenCalled();
+    expect(vault.listings).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(outcome).toHaveBeenCalledWith(expect.stringContaining('NETWORK_TIMEOUT: GitHub did not respond within 10 seconds'));
+    finish(await remoteTransport([])(transport.mock.calls[0]![0]));
+    expect(vault.listings).toEqual([]);
+    expect(vault.reads).toEqual([]);
+    expect((await service.preview(options, 'test')).plan.counts.ADD).toBe(1);
+    expect(calls.filter(request => request.url.includes('/ref/'))).toHaveLength(1);
+    expect(outcome).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 403, 404])('reports HTTP %i before scanning local files', async status => {
+    const vault = new MemoryVault({ 'a.md': 'A' });
+    const transport = vi.fn(async () => ({ status, json: null }));
+    await expect(new PreviewService(vault, transport, '.obsidian').preview(options, 'test'))
+      .rejects.toMatchObject({ stage: 'REMOTE_REF', code: `HTTP_${status}` });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(vault.listings).toEqual([]);
+    expect(vault.reads).toEqual([]);
+  });
+
   it('re-hashes both passes and reports remote-only delete while leaving both stores unchanged', async () => {
     const vault = new MemoryVault({ 'a.md': 'after', '.gitignore': '*.mp3', 'audio.mp3': [0, 1, 255], 'image.png': [137, 80, 0, 255] });
     const remote = treeEntries({ 'a.md': bytes('before'), '.gitignore': bytes('*.mp3'), 'legacy.md': bytes('legacy') });
@@ -118,7 +157,7 @@ describe('Full read-only Preview', () => {
     const vault = new MemoryVault({ 'a.md': 'before', '.gitignore': '*.mp3' });
     const base = remoteTransport([]);
     const transport: GetTransport = async request => {
-      if (request.url.includes('/ref/')) {
+      if (request.url.includes('/commits/')) {
         if (change === 'same-size bytes') vault.files.set('a.md', bytes('AFTER!'));
         if (change === 'new file') vault.files.set('new.md', bytes('new'));
         if (change === 'ignore rules') vault.files.set('.gitignore', bytes('*.wav'));
@@ -140,10 +179,12 @@ describe('Full read-only Preview', () => {
     expect((await service.preview(options, 'secret')).plan.counts.ADD).toBe(1);
     expect(vault.reads.filter(path => path === 'a.md')).toHaveLength(3);
   });
-  it('rejects unreadable .gitignore before network', async () => {
-    const vault = new MemoryVault({ '.gitignore': [255, 255] }); let requests = 0;
-    await expect(new PreviewService(vault, async () => { requests++; return { status: 200, json: {} }; }, '.obsidian').preview(options, '')).rejects.toMatchObject({ stage: 'IGNORE' });
-    expect(requests).toBe(0);
+  it('rejects unreadable .gitignore after checking HEAD and before scanning or reading the tree', async () => {
+    const vault = new MemoryVault({ '.gitignore': [255, 255] });
+    const calls: GetRequest[] = [];
+    await expect(new PreviewService(vault, remoteTransport([], calls), '.obsidian').preview(options, '')).rejects.toMatchObject({ stage: 'IGNORE' });
+    expect(calls.map(call => call.url.split('/git/')[1])).toEqual(['ref/heads/main']);
+    expect(vault.listings).toEqual([]);
   });
 });
 

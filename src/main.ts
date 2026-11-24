@@ -38,9 +38,12 @@ export default class LocalMirrorSyncPlugin extends Plugin {
   private activityPanel?: ActivityPanel;
   private activityClock?: number;
   private reviewing = false;
+  private manualSyncRunning = false;
   private unloaded = false;
   private productPending: Promise<unknown> = Promise.resolve();
   private readonly autoSettings = new WeakMap<object, string>();
+
+  private get syncBusy(): boolean { return this.manualSyncRunning || this.sync.running; }
 
   async onload(): Promise<void> {
     this.settings = loadSettings(await this.loadData());
@@ -79,7 +82,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       this.statusBar.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.openActivity(); } };
     }
     this.auto = new AutoSyncController({
-      settings: () => this.settings, busy: () => this.sync.running || this.reviewing,
+      settings: () => this.settings, busy: () => this.syncBusy || this.reviewing,
       check: async () => {
         await this.metadataPending; await this.productPending;
         if (this.stateError || this.productError) throw this.stateError ?? this.productError;
@@ -230,6 +233,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
   }
 
   openPreview(verifyOnly = false): void {
+    if (this.manualSyncRunning || this.sync.executing) { this.openActivityPanel(); return; }
     if (this.sync.running) return;
     this.previewModal?.close();
     this.reviewing = true;
@@ -265,18 +269,36 @@ export default class LocalMirrorSyncPlugin extends Plugin {
       } catch (error) { preflightError = signal.aborted ? undefined : safeError(error); throw error; }
       finally { if (this.product.activitySnapshot().running && !this.sync.running) this.product.activity({ type: 'end', error: preflightError }); }
     }, verifyOnly ? undefined : {
-      execute: async (result, progress, signal, confirmation) => {
-        await this.metadataPending;
-        if (this.stateError) throw this.stateError instanceof Error ? this.stateError : new Error(safeError(this.stateError));
-        if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Refresh Preview.');
-        try { await this.sync.execute(result, this.tokens.read(settings), progress, signal, confirmation); this.auto.reviewed(); }
-        catch (error) { try { this.syncState.current(); } catch (stateError) { this.stateError = stateError; } await this.recordFailure(error); throw error; }
-        finally { this.queueIdentityUpdates(); await this.metadataPending; }
+      execute: async (result, progress, confirmation) => {
+        if (this.syncBusy) throw new PreviewError('SYNC', 'BUSY', 'A sync is already running.');
+        this.manualSyncRunning = true;
+        this.product.activity({ type: 'start', operation: 'sync' });
+        let metadataReady = false;
+        try {
+          progress('Waiting for local file identity updates');
+          await readWithTimeout(() => this.metadataPending, 'LOCAL_STATE');
+          metadataReady = true;
+          if (this.stateError) throw this.stateError instanceof Error ? this.stateError : new Error(safeError(this.stateError));
+          if (JSON.stringify(this.settings) !== settingsKey) throw new PreviewError('SETTINGS', 'SETTINGS_CHANGED', 'Settings changed. Refresh Preview.');
+          await this.sync.execute(result, this.tokens.read(settings), progress, undefined, confirmation);
+          this.auto.reviewed();
+        } catch (error) {
+          if (this.product.activitySnapshot().running) this.product.activity({ type: 'end', error: safeError(error) });
+          try { this.syncState.current(); } catch (stateError) { this.stateError = stateError; }
+          await this.recordFailure(error);
+          throw error;
+        } finally {
+          this.manualSyncRunning = false;
+          if (metadataReady) {
+            this.queueIdentityUpdates();
+            await this.metadataPending;
+          }
+        }
       },
       resolve: (result, key, choice) => this.sync.resolve(result, key, choice),
       resolveAll: (result, choice) => this.sync.resolveAll(result, choice),
       selectAdoption: (result, choice) => this.sync.selectAdoption(result, choice),
-      inspect: (result, entry) => this.sync.inspect(result, entry, this.tokens.read(settings)),
+      inspect: (result, entry, signal) => this.sync.inspect(result, entry, this.tokens.read(settings), signal),
       recover: action => this.openRecovery(action),
       recoveryPending: async () => !!await this.sync.transactions.active(),
     }, action => this.openRecovery(action), () => this.product.activitySnapshot());
@@ -286,7 +308,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
   }
 
   async saveSettings(settings: Settings, token?: string): Promise<void> {
-    if (this.sync.running) throw new PreviewError('SETTINGS', 'SYNC_RUNNING', 'Wait for the running sync before changing settings.');
+    if (this.syncBusy) throw new PreviewError('SETTINGS', 'SYNC_RUNNING', 'Wait for the running sync before changing settings.');
     const saved = token === undefined ? { ...settings } : this.tokens.withToken(settings, token);
     try { await this.saveData(saved); }
     catch { throw new PreviewError('SETTINGS', 'SAVE_FAILED', 'Settings could not be saved.'); }
@@ -297,7 +319,7 @@ export default class LocalMirrorSyncPlugin extends Plugin {
   }
 
   openRecovery(intent?: RecoveryAction): void {
-    if (this.sync.running) return;
+    if (this.syncBusy) return;
     this.previewModal?.close();
     this.recoveryModal?.close();
     this.reviewing = true;

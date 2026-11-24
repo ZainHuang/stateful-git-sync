@@ -17,11 +17,11 @@ import { SyncProgressView } from './SyncProgressView';
 type RunPreview = (progress: Progress, signal: AbortSignal) => Promise<StatefulPreviewResult>;
 const PAGE_SIZE = 10;
 export interface SyncActions {
-  execute(result: SyncPreview, progress: Progress, signal: AbortSignal, confirmation: string): Promise<void>;
+  execute(result: SyncPreview, progress: Progress, confirmation: string): Promise<void>;
   resolve(result: SyncPreview, key: string, choice: Resolution): SyncPreview;
   resolveAll(result: SyncPreview, choice: Resolution): SyncPreview;
   selectAdoption(result: SyncPreview, choice: Resolution): SyncPreview;
-  inspect(result: SyncPreview, entry: SyncDecision): Promise<string>;
+  inspect(result: SyncPreview, entry: SyncDecision, signal?: AbortSignal): Promise<string>;
   recover(action?: RecoveryAction): void;
   recoveryPending?(): Promise<boolean>;
 }
@@ -57,7 +57,8 @@ export class PreviewModal extends Modal {
     this.fileModal?.close();
     this.confirmationModal?.close();
     this.releaseViewport?.();
-    if (!this.executing) this.controller?.abort();
+    this.controller?.abort();
+    this.flow = undefined;
     this.contentEl.empty();
   }
 
@@ -212,21 +213,29 @@ export class PreviewModal extends Modal {
       execute.disabled = !canExecutePreview(prepared);
       const run = async (confirmation: string) => {
         if (this.executing || execute.disabled || !canExecutePreview(prepared) || this.result !== prepared || this.controller?.signal.aborted) return;
+        const view = this.controller!.signal;
         this.executing = true;
         this.contentEl.querySelectorAll('button, input').forEach(e => { (e as HTMLButtonElement).disabled = true; });
         this.header(); this.flow = new SyncProgressView(el); this.flow.setMessage('Rechecking Preview…'); this.renderActivity();
+        const actions = el.createDiv({ cls: 'lms-footer' });
+        actions.createEl('button', { text: '关闭窗口，继续同步', cls: 'lms-dismiss-sync' }).onclick = () => this.close();
         try {
-          await this.actions!.execute(prepared, text => { this.flow?.setMessage(text); this.renderActivity(); }, this.controller!.signal, confirmation);
+          await this.actions!.execute(prepared, text => {
+            if (!view.aborted) { this.flow?.setMessage(text); this.renderActivity(); }
+          }, confirmation);
+          if (view.aborted) return;
           this.header();
           this.contentEl.createEl('p', { text: this.activity?.().pendingChanges ? '本轮快照已同步，新的修改已保留，等待下一轮同步。' : 'Sync verified. BASE updated successfully.', cls: 'lms-status' });
           this.flow = new SyncProgressView(this.contentEl); this.renderActivity();
           this.contentEl.createEl('button', { text: 'Preview again' }).onclick = () => { void this.load(); };
         } catch (error) {
+          if (view.aborted) return;
           this.header();
           this.contentEl.createEl('p', { text: safeError(error), cls: 'lms-error', attr: { role: 'alert' } });
           this.contentEl.createEl('p', { text: 'BASE is updated only after verification. If a transaction started, its backups remain available for recovery.', cls: 'lms-muted' });
           let pending: boolean;
           try { pending = await this.actions!.recoveryPending?.() ?? false; } catch { pending = true; }
+          if (view.aborted) return;
           if (pending) recoveryActions(this.contentEl, action => this.actions!.recover(action));
           else this.contentEl.createEl('button', { text: 'Refresh Preview' }).onclick = () => { void this.load(); };
         } finally { this.executing = false; }
@@ -336,7 +345,7 @@ export class PreviewModal extends Modal {
         body.querySelector('.lms-compare')?.remove();
         const content = body.createEl('pre', { text: 'Loading pinned versions…', cls: 'lms-compare', attr: { role: 'status' } });
         content.scrollIntoView({ block: 'nearest' });
-        try { content.setText(await this.actions!.inspect(current, entry)); } catch (error) { content.setText(safeError(error)); }
+        try { content.setText(await this.actions!.inspect(current, entry, this.controller?.signal)); } catch (error) { content.setText(safeError(error)); }
         finally { compare.disabled = false; }
       };
       compare.onclick = () => { void inspectVersions(); };

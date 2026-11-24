@@ -8,8 +8,9 @@ export async function verifyActivity({ page, remote, report, runDir, preview, cl
   await surface('.lms-activity-panel');
   await getUI().getByText('No activity in this session.', { exact: true }).waitFor();
   await shot('activity-empty');
-  await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].activityPanel.close());
+  await page.evaluate(() => { app.plugins.plugins['local-mirror-sync'].activityPanel.close(); document.body.classList.add('emulate-mobile'); });
   await preview();
+  await getUI().setViewportSize({ width: 412, height: 915 });
   await page.evaluate(() => {
     const p = app.plugins.plugins['local-mirror-sync']; const transport = p.sync.transport;
     p.sync.transport = async r => {
@@ -22,19 +23,54 @@ export async function verifyActivity({ page, remote, report, runDir, preview, cl
       }
       const result = await transport(r); if (r.method === 'PATCH') window.__activityPublished = true; return result;
     };
-    const vault = p.sync.vault; const read = vault.readBinary;
+    const vault = p.sync.vault; const list = vault.list; const read = vault.readBinary;
+    let revalidateListings = 0;
+    vault.list = async path => {
+      const entries = await list(path);
+      // The second root inventory is after the verification acquired its index ticket.
+      if (!path && p.product.activitySnapshot().stage === 'Revalidate' && ++revalidateListings === 2) {
+        window.__activityGate = 'revalidate';
+        await new Promise(resolve => { window.__releaseRevalidate = resolve; });
+      }
+      return entries;
+    };
     vault.readBinary = async path => {
       if (p.product.activitySnapshot().stage === 'Verify local' && !window.__released_verify) {
         window.__activityGate = 'verify'; await new Promise(resolve => { window.__releaseActivity = () => { window.__released_verify = true; resolve(); }; });
       }
       return read(path);
     };
+    const saveState = p.syncState.save.bind(p.syncState);
+    p.syncState.save = async state => {
+      // A frozen upload can verify its snapshot without a live local scan.
+      if (window.__holdActivitySave && p.product.activitySnapshot().stage === 'Save BASE' && !window.__released_verify) {
+        window.__activityGate = 'verify';
+        await new Promise(resolve => { window.__releaseActivity = () => { window.__released_verify = true; resolve(); }; });
+      }
+      return saveState(state);
+    };
   });
   await getUI().getByRole('button', { name: 'Sync & Verify', exact: true }).click();
+  await page.waitForFunction(() => window.__activityGate === 'revalidate');
+  const dismiss = getUI().getByRole('button', { name: '关闭窗口，继续同步', exact: true });
+  await dismiss.waitFor();
+  assert((await dismiss.boundingBox()).height >= 44);
+  assert(await getUI().locator('.lms-preview-modal').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  await shot('activity-mobile-dismiss-sync');
+  const commitsBefore = remote.calls.filter(call => call.method === 'POST' && call.resource === 'commits').length;
+  await dismiss.click();
+  await getUI().locator('.lms-preview-modal').waitFor({ state: 'hidden' });
+  await page.evaluate(async () => {
+    const plugin = app.plugins.plugins['local-mirror-sync'];
+    if (!plugin.previewModal.controller.signal.aborted || !plugin.sync.executing) throw new Error('Closing must cancel the view alone');
+    await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath('note.md'));
+    document.dispatchEvent(new Event('resume'));
+    window.__releaseRevalidate();
+  });
   await page.waitForFunction(() => window.__activityGate === 'publish');
   assert.match(await page.locator('.lms-activity-entry').innerText(), /同步文件/);
-  // Closing Preview must not cancel a journaled transaction; inspect the global entry.
-  await close(); await page.locator('.lms-activity-entry').click(); await surface('.lms-activity-panel');
+  await page.locator('.lms-activity-ribbon').dispatchEvent('click');
+  await surface('.lms-activity-panel');
   await getUI().locator('.lms-activity-current').getByText('同步文件', { exact: true }).waitFor();
   assert.deepEqual(await getUI().locator('.lms-business-stages li').allTextContents(), ['检查差异', '同步文件', '安全校验']);
   assert.equal(await getUI().locator('.lms-technical-details').getAttribute('open'), null);
@@ -58,6 +94,10 @@ export async function verifyActivity({ page, remote, report, runDir, preview, cl
   for (const stage of ['Scan local', 'Read remote', 'Build plan', 'Upload blobs', 'Create tree', 'Create commit', 'Publish', 'Verify remote', 'Verify local', 'Save BASE', 'Complete']) assert.equal(await getUI().locator('.lms-activity-steps').getByText(stage, { exact: true }).count(), 1);
   await shot('activity-complete');
   await page.locator('.lms-activity-entry').getByText('Verified', { exact: true }).waitFor();
+  assert.equal(remote.calls.filter(call => call.method === 'POST' && call.resource === 'commits').length, commitsBefore + 1);
+  assert.equal(await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].sync.transactions.active()), null);
+  assert.equal(await page.evaluate(() => app.workspace.getLeavesOfType('markdown')[0]?.view.file?.path), 'note.md');
+  report.checks.push('Mobile dismissal aborts the Preview only, resumes an invalidated local verification, leaves the editor open and completes one verified sync through the ribbon Activity panel');
   const doneCalls = remote.calls.length;
   await getUI().setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { document.body.classList.add('emulate-mobile'); app.workspace.leftSplit.collapse(); app.workspace.rightSplit.collapse(); });
@@ -80,6 +120,7 @@ export async function verifyActivity({ page, remote, report, runDir, preview, cl
     const p = app.plugins.plugins['local-mirror-sync'];
     await p.saveSettings({ ...p.settings, autoSync: true, autoSyncDebounceSeconds: 3 });
     window.__activityPublished = false; window.__released_publish = false; window.__released_verify = false; window.__activityGate = undefined;
+    window.__holdActivitySave = true;
     await app.vault.modify(app.vault.getAbstractFileByPath('note.md'), '# Auto activity');
   });
   await page.locator('.lms-activity-entry').getByText(/Auto sync in [1-3]s/).waitFor();

@@ -24,7 +24,7 @@ export interface PerformanceSnapshot {
 const clock = () => performance.now();
 const length = (s: string) => new TextEncoder().encode(s).byteLength;
 const phase = (stage: ActivityStage): PerformanceStage => /Verify|candidate|BASE|Finalize|Complete/.test(stage) ? 'Verify'
-  : stage === 'Read remote' || stage === 'Build plan' ? 'Read Remote'
+  : stage === 'Check GitHub connection' || stage === 'Read remote' || stage === 'Build plan' ? 'Read Remote'
   : /Scan|Revalidate/.test(stage) ? 'Scan' : 'Transfer';
 
 /** Per-service diagnostics. No content, token, planner state or execution authority. */

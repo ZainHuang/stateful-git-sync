@@ -122,6 +122,10 @@ export class LocalChangeIndex {
     this.data.cursor = (this.data.cursor + count) % ordered.length;
     return sample;
   }
+  invalidatedByLifecycle(ticket: IndexTicket): boolean {
+    return ticket.epoch !== this.epoch && ticket.revision === this.data.revision
+      && (this.reason === 'backgrounded' || this.reason === 'mobile-resume');
+  }
   assertCurrent(ticket: IndexTicket): void {
     if (ticket.revision !== this.data.revision || ticket.epoch !== this.epoch) throw new PreviewError('LOCAL_SCAN', 'LOCAL_CHANGED', 'Vault events changed during verification. Changes remain queued; run Preview again.');
   }

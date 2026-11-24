@@ -45,8 +45,12 @@ export async function verifyPreviewStartup({ page, remote, report, runDir, previ
     plugin.openPreview();
   });
   await surface('.lms-preview-modal'); ui = getUI(); await ui.setViewportSize({ width: 390, height: 844 });
-  await ui.locator('.lms-error[role="alert"]').waitFor({ timeout: 36_000 });
-  assert.match(await ui.locator('.lms-preview-modal').innerText(), /REMOTE_REF · NETWORK_TIMEOUT/);
+  await ui.locator('.lms-activity-current').getByText('正在检查 GitHub 连接', { exact: true }).waitFor();
+  await ui.screenshot({ path: join(runDir, 'mobile-github-connection-check.png') }); report.screenshots.push('mobile-github-connection-check.png');
+  await ui.locator('.lms-error[role="alert"]').waitFor({ timeout: 15_000 });
+  assert.match(await ui.locator('.lms-preview-modal').innerText(), /REMOTE_REF · NETWORK_TIMEOUT: GitHub did not respond within 10 seconds/);
+  const activity = await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].product.activitySnapshot());
+  assert.deepEqual(activity.steps.map(step => step.stage), ['Check GitHub connection']);
   assert.deepEqual(await state(), before); assert.equal(remote.head, head);
   await page.evaluate(() => {
     const plugin = app.plugins.plugins['local-mirror-sync'];
@@ -56,7 +60,7 @@ export async function verifyPreviewStartup({ page, remote, report, runDir, previ
   assert.equal(await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].sync.running), false);
   await ui.getByRole('button', { name: 'Retry Preview', exact: true }).click(); await surface('.lms-summary');
   assert.deepEqual(await state(), before); assert.equal(remote.head, head); await close();
-  report.checks.push('Stalled GitHub GET reports NETWORK_TIMEOUT; late response cannot produce a plan; retry releases and reuses the Preview lock safely');
+  report.checks.push('Stalled GitHub check is visible, stops after 10 seconds without a local scan and allows a safe retry even after a late response');
 
   await page.evaluate(async () => {
     const plugin = app.plugins.plugins['local-mirror-sync']; const revision = plugin.product.revision;

@@ -21,7 +21,7 @@ export class PreviewService {
   async preview(options: PreviewOptions, token: string, progress: Progress = () => {}, signal?: AbortSignal): Promise<PreviewResult> {
     const deviceState = { ...this.deviceState() };
     const capture = await new PreviewSnapshotReader(this.reader, this.transport, this.configDir).read(options, token, progress, signal);
-    await capture.verify();
+    await capture.verify({ signal });
     const { local, remote, ignore } = capture;
     progress('Checking device initialization');
     const gate = new InitializationGate().evaluate(local, remote, deviceState, ignore);

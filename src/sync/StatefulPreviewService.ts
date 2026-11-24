@@ -29,7 +29,7 @@ export class StatefulPreviewService {
       remoteManifest = { invalid: true };
       manifestFailure = error;
     }
-    await capture.verify();
+    await capture.verify({ signal });
     if (JSON.stringify(this.currentState()) !== JSON.stringify(state)) throw new PreviewError('LOCAL_STATE', 'LOCAL_STATE_CHANGED', 'Local sync metadata changed during Preview. Run Preview again.');
     progress('Comparing BASE / LOCAL / REMOTE');
     const plan = new ThreeWaySyncPlanner().create({ base: state.baseManifest ?? null, local: capture.local,

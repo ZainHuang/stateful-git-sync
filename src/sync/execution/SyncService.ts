@@ -1,5 +1,6 @@
 import type { ActivityStage, ActivitySnapshot } from '../../product/SyncActivity';
 import { assertActive, isRetryableSyncError, PreviewError, readWithTimeout, safeError } from '../../errors';
+import { GITHUB_CONNECTION_TIMEOUT_MS } from '../../github/GitHubClient';
 import { GitHubWriter, MAX_SYNC_FILE_BYTES, type PublishEvent } from '../../github/GitHubWriter';
 import { RemoteManifestReader, MAX_MANIFEST_BYTES } from '../../github/RemoteManifestReader';
 import { RemoteTreeReader } from '../../github/RemoteTreeReader';
@@ -73,12 +74,11 @@ export class SyncService {
       if (await readWithTimeout(() => this.transactions.active(), 'RECOVERY', signal,
         'Pending recovery could not be read within 30 seconds. Check local storage and retry Preview. Recovery files are retained.')) throw recoveryError();
       const state = parseLocalState(this.state.current());
-      await this.index?.validateStorage();
       if (state.baseManifest && (!state.target || !sameTarget(state.target, options))) throw fail('TARGET_MISMATCH', 'This device BASE belongs to another repository or branch. Use a separate Vault.');
       const capture = await new PreviewSnapshotReader(this.vault, this.transport, this.configDir, this.performance, this.index, this.index ? this.remoteCache : undefined, fullIntegrity)
         .read(options, token, progress, signal, stage);
       const manifest = await new RemoteManifestReader(capture.client, this.performance, this.index ? this.remoteCache : undefined).read(capture.remote, signal);
-      await capture.verify();
+      await capture.verify({ signal });
       if (JSON.stringify(this.state.current()) !== JSON.stringify(state)) throw fail('STATE_CHANGED', 'Device metadata changed. Refresh Preview.');
       const scopeKey = JSON.stringify({ configDir: this.configDir, includeObsidian: options.includeObsidian, patterns: options.ignorePatterns, gitignore: capture.gitignore });
       stage('Build plan');
@@ -132,9 +132,9 @@ export class SyncService {
     const execution = compileExecution(old.capture, parseLocalState(JSON.parse(old.stateKey)), old.manifest, old.execution.scopeKey, {}, identities, choice);
     return this.result({ ...old, execution, resolutions: {} });
   }
-  async inspect(preview: SyncPreview, entry: SyncDecision, token: string): Promise<string> {
+  async inspect(preview: SyncPreview, entry: SyncDecision, token: string, signal?: AbortSignal): Promise<string> {
     const { capture, options, manifest } = this.session(preview);
-    await capture.verify();
+    await capture.verify({ signal });
     const legacy = !manifest ? capture.remote.entries.find(f => f.path === entry.path && f.type === 'blob') : undefined;
     const remote = (entry.fileId ? manifest?.files[entry.fileId] : Object.values(manifest?.files ?? {}).find(file => !file.deleted && file.path === entry.path))
       ?? (legacy ? { path: legacy.path, blobSha: legacy.sha, deleted: false } : undefined);
@@ -171,6 +171,11 @@ export class SyncService {
       if (trusted.requiresDeleteConfirmation && deleteConfirmation !== `DELETE ${trusted.deletions}`) throw fail('DELETE_CONFIRMATION', `Type DELETE ${trusted.deletions} to approve this deletion count.`);
       if (await this.transactions.active()) throw recoveryError();
       if (JSON.stringify(this.state.current()) !== session.stateKey) throw fail('STATE_CHANGED', 'Metadata changed. Refresh Preview.');
+      const github = new GitHubWriter(options, token, this.transport, this.performance);
+      progress('Checking GitHub connection');
+      if (await github.head(signal, GITHUB_CONNECTION_TIMEOUT_MS) !== capture.remote.remoteHeadSha) {
+        throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
+      }
       // Only ordinary, conflict-free uploads can detach from live local bytes.
       // The existing content-addressed recovery store is the immutable batch.
       // Downloads, explicit resolutions and scope/config changes retain the strict path.
@@ -179,9 +184,7 @@ export class SyncService {
         && !e.plan.entries.some(entry => entry.category.startsWith('PUSH_') && [entry.path, entry.oldPath].some(path => path
           && (path === '.gitignore' || path.startsWith(`${this.configDir}/`) || path.startsWith(`${STANDARD_CONFIG_DIRECTORY}/`))));
       const uploadSnapshot = stableLocalPlan && e.plan.entries.some(entry => entry.category.startsWith('PUSH_'));
-      await capture.verify(stableLocalPlan); assertActive(signal);
-      const github = new GitHubWriter(options, token, this.transport, this.performance);
-      if (await github.head() !== capture.remote.remoteHeadSha) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
+      await capture.verify({ reuseIndex: stableLocalPlan, signal, progress }); assertActive(signal);
       const id = crypto.randomUUID();
       const manifestBytes = new TextEncoder().encode(JSON.stringify(parseManifest(e.manifest)));
       if (manifestBytes.length > MAX_MANIFEST_BYTES) throw fail('MANIFEST_LIMIT', 'Manifest exceeds the supported 2 MiB limit.');
@@ -208,7 +211,7 @@ export class SyncService {
       for (const sha of retained) {
         assertActive(signal); if (!staged.has(sha)) { await this.transactions.putBlob(id, await github.download(sha)); staged.add(sha); }
       }
-      if (uploadSnapshot) await capture.verifyScope(); else await capture.verify(stableLocalPlan);
+      if (uploadSnapshot) await capture.verifyScope(signal); else await capture.verify({ reuseIndex: stableLocalPlan, signal, progress });
       if (JSON.stringify(this.state.current()) !== session.stateKey) throw fail('STATE_CHANGED', 'Metadata changed. Refresh Preview.');
       if (await github.head() !== capture.remote.remoteHeadSha) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
       assertActive(signal);
@@ -225,7 +228,7 @@ export class SyncService {
         this.stage('Backup remote');
         progress('Creating and verifying GitHub backup ref');
         await github.backup(t.backupRef, t.originalHead);
-        if (uploadSnapshot) await capture.verifyScope(); else await capture.verify();
+        if (uploadSnapshot) await capture.verifyScope(); else await capture.verify({ progress });
         if (await github.head() !== t.originalHead) throw fail('REMOTE_HEAD_CHANGED', 'GitHub changed. Refresh Preview.');
       }
       const changed = !session.manifest || JSON.stringify(e.manifest) !== JSON.stringify(session.manifest);
@@ -258,7 +261,7 @@ export class SyncService {
         t.publication = { treeSha, events: [{ kind: 'commit-created', at: new Date().toISOString(), commit: t.commit }] };
         this.active();
         await this.transactions.save(t);
-        if (uploadSnapshot) await capture.verifyScope(); else await capture.verify();
+        if (uploadSnapshot) await capture.verifyScope(); else await capture.verify({ progress });
         this.active();
         this.stage('Check candidate');
         await this.verifyRemoteCandidate(t, github);

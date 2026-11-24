@@ -1,7 +1,7 @@
 import type { ProductCache } from './ProductStore';
 import type { PerformanceSnapshot, VerificationLevel } from './SyncPerformance';
 
-export type ActivityStage = 'Scan local' | 'Read remote' | 'Build plan' | 'Revalidate' | 'Stage recovery copies' | 'Backup remote' | 'Upload blobs' | 'Create tree' | 'Create commit' | 'Check candidate' | 'Publish' | 'Verify remote' | 'Apply local' | 'Verify local' | 'Save BASE' | 'Finalize transaction' | 'Complete';
+export type ActivityStage = 'Check GitHub connection' | 'Scan local' | 'Read remote' | 'Build plan' | 'Revalidate' | 'Stage recovery copies' | 'Backup remote' | 'Upload blobs' | 'Create tree' | 'Create commit' | 'Check candidate' | 'Publish' | 'Verify remote' | 'Apply local' | 'Verify local' | 'Save BASE' | 'Finalize transaction' | 'Complete';
 export interface ActivitySnapshot {
   running: boolean; operation?: 'preview' | 'sync'; stage?: ActivityStage;
   steps: { stage: ActivityStage; at: number }[];
@@ -16,7 +16,7 @@ export type ActivityEvent =
 
 export const BUSINESS_STAGES = ['检查差异', '同步文件', '安全校验'] as const;
 export function businessStage(stage?: ActivityStage): typeof BUSINESS_STAGES[number] {
-  if (!stage || ['Scan local', 'Read remote', 'Build plan', 'Revalidate'].includes(stage)) return BUSINESS_STAGES[0];
+  if (!stage || ['Check GitHub connection', 'Scan local', 'Read remote', 'Build plan', 'Revalidate'].includes(stage)) return BUSINESS_STAGES[0];
   if (['Verify local', 'Save BASE', 'Finalize transaction', 'Complete'].includes(stage)) return BUSINESS_STAGES[2];
   return BUSINESS_STAGES[1];
 }

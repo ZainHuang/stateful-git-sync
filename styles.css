@@ -74,7 +74,7 @@
 .lms-file-path { overflow-wrap: anywhere; font-weight: var(--font-semibold); }
 .lms-file-body .lms-compare { max-height: none; overflow: visible; }
 .lms-file-actions { flex-shrink: 0; margin: 0; padding-top: 10px; border-top: 1px solid var(--background-modifier-border); }
-.lms-file-actions button { min-height: 44px; }
+.lms-file-actions button, .lms-viewport-container .lms-dismiss-sync { min-height: 44px; }
 .lms-viewport-container .modal.lms-preview-modal,
 .lms-viewport-container .modal.lms-file-modal { height: 100%; width: calc(100% - 16px); padding: 16px; }
 .lms-viewport-container .lms-preview-modal .lms-table-wrap { max-height: none; overflow: visible; flex-shrink: 0; }

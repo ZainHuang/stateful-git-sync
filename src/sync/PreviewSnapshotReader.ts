@@ -1,6 +1,6 @@
 import type { ActivityStage } from '../product/SyncActivity';
 import { assertActive, PreviewError } from '../errors';
-import { GitHubClient } from '../github/GitHubClient';
+import { GitHubClient, GITHUB_CONNECTION_TIMEOUT_MS } from '../github/GitHubClient';
 import { RemoteTreeReader } from '../github/RemoteTreeReader';
 import type { GetTransport } from '../github/types';
 import { IgnoreService } from '../vault/IgnoreService';
@@ -24,7 +24,14 @@ export class PreviewSnapshotReader {
   }
   async read(options: PreviewOptions, token: string, progress: Progress, signal?: AbortSignal, stage: (stage: ActivityStage, processed?: number, total?: number) => void = () => {}) {
     const client = new GitHubClient(options, token, this.transport);
-    assertActive(signal); progress('Reading ignore rules');
+    const remoteReader = new RemoteTreeReader(client, this.remoteCache);
+    assertActive(signal);
+    stage('Check GitHub connection');
+    progress('Checking GitHub connection');
+    const head = await remoteReader.readHead(options.branch, signal, GITHUB_CONNECTION_TIMEOUT_MS);
+    await this.index?.validateStorage();
+    assertActive(signal);
+    progress('Reading ignore rules');
     const gitignore = await this.readGitignore();
     const ignore = new IgnoreService({ includeObsidian: options.includeObsidian, patterns: options.ignorePatterns, gitignore, configDir: this.configDir });
     const scanner = new VaultScanner(this.reader, this.measurement);
@@ -35,13 +42,16 @@ export class PreviewSnapshotReader {
     const local = await scanner.scan(ignore, progress, signal, [], (processed, total) => stage('Scan local', processed, total), cache ? { ...cache, audit: true } : undefined);
     if (local.verification === 'full') this.remoteCache?.clear();
     stage('Read remote');
-    const remote = await new RemoteTreeReader(client, this.remoteCache).read(options.branch, progress, signal);
-    const verifyScope = async () => {
+    const remote = await remoteReader.readCommit(head, progress, signal);
+    const verifyScope = async (signal?: AbortSignal) => {
+      assertActive(signal);
       if (gitignore !== await this.readGitignore()) throw new PreviewError('LOCAL_SCAN', 'LOCAL_CHANGED', 'Ignore rules changed. Run Preview again.');
       assertActive(signal);
     };
     let watermark = local.indexWatermark;
-    const verify = async (reuseIndex = false) => {
+    // The reviewed snapshot outlives the Preview window. Each caller supplies its own cancellation signal.
+    const verify = async ({ reuseIndex = false, signal, progress: report = progress }: { reuseIndex?: boolean; signal?: AbortSignal; progress?: Progress } = {}) => {
+      assertActive(signal);
       const current = this.index?.snapshot();
       // The initial Preview still reconciles full inventories. A later pure-upload
       // checkpoint may reuse that proof only while its exact event epoch/revision
@@ -49,12 +59,12 @@ export class PreviewSnapshotReader {
       // an event during index persistence must remain a later change.
       if (reuseIndex && local.verification === 'incremental' && current?.trusted && watermark
         && current.revision === watermark.revision && current.epoch === watermark.epoch) {
-        await verifyScope(); return;
+        await verifyScope(signal); return;
       }
-      progress('Rechecking local content for changes');
+      report('Rechecking local content for changes');
       // Initial Scan and final Verify reconcile metadata. These checkpoints use
       // the live event watermark plus complete inventories and dirty byte reads.
-      const checked = await scanner.scan(ignore, progress, signal, [], undefined, cache ? { ...cache, metadataCheck: false } : undefined);
+      const checked = await scanner.scan(ignore, report, signal, [], undefined, cache ? { ...cache, metadataCheck: false } : undefined);
       // Only eligible bytes define a snapshot. Internal/history/workspace writes,
       // ignored additions and protected directory creation never stale the ticket.
       const comparable = (snapshot: typeof local) => snapshot.files;

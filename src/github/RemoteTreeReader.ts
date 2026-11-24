@@ -39,12 +39,15 @@ export class RemoteTreeReader {
 
   async read(branch: string, progress: Progress = () => {}, signal?: AbortSignal): Promise<RemoteSnapshot> {
     progress('Reading GitHub branch HEAD');
-    const ref = obj(await this.client.get(`ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, 'REMOTE_REF', signal));
+    return this.readCommit(await this.readHead(branch, signal), progress, signal);
+  }
+
+  async readHead(branch: string, signal?: AbortSignal, timeoutMs?: number): Promise<string> {
+    const ref = obj(await this.client.get(`ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, 'REMOTE_REF', signal, timeoutMs));
     if (ref.ref !== `refs/heads/${branch}`) throw invalid();
     const target = obj(ref.object);
     if (target.type !== 'commit') throw invalid();
-    const remoteHeadSha = sha(target.sha);
-    return this.readCommit(remoteHeadSha, progress, signal);
+    return sha(target.sha);
   }
 
   async readCommit(remoteHeadSha: string, progress: Progress = () => {}, signal?: AbortSignal): Promise<RemoteSnapshot> {

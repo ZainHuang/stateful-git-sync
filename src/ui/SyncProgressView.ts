@@ -42,8 +42,9 @@ export class SyncProgressView {
     const signature = JSON.stringify([a, a.running ? elapsed : undefined]); if (signature === this.signature) return; this.signature = signature;
     const verified = a.verified && !a.error && !a.pendingChanges;
     const count = a.processed !== undefined && a.total !== undefined ? `${a.processed} / ${a.total} files` : '';
+    const runningStage = a.running && a.stage === 'Check GitHub connection' ? '正在检查 GitHub 连接' : stage;
     this.current.empty();
-    this.current.createEl('strong', { text: a.error ? '需要处理' : a.retrying ? '等待自动重试' : a.pendingChanges ? a.verified ? '本轮已同步，新的修改等待下一轮' : '有新的本地变更' : verified ? 'Verified' : a.stage ? stage : a.running ? BUSINESS_STAGES[0] : 'No activity in this session.' });
+    this.current.createEl('strong', { text: a.error ? '需要处理' : a.retrying ? '等待自动重试' : a.pendingChanges ? a.verified ? '本轮已同步，新的修改等待下一轮' : '有新的本地变更' : verified ? 'Verified' : a.stage ? runningStage : a.running ? BUSINESS_STAGES[0] : 'No activity in this session.' });
     if (count && a.running) this.current.createSpan({ text: count, cls: 'lms-muted' });
     const index = BUSINESS_STAGES.indexOf(stage);
     this.root.toggleClass('lms-sync-verified', verified);

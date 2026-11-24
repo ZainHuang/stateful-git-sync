@@ -40,6 +40,24 @@ describe('V1.2 dirty-file pipeline and bounded integrity audits', () => {
     expect(new Set(a.vault.reads).size).toBe(40);
     expect(a.service.performanceSnapshot().verification).toBe('Published Snapshot Verified');
   });
+  it('reads fresh bytes when a foreground transition invalidates a scan mid-read', async () => {
+    const a = await indexedDevice({ 'A.md': 'old', 'B.md': 'old' });
+    const scanner = new VaultScanner(a.vault);
+    const ignore = new IgnoreService({ includeObsidian: false, configDir: '.obsidian', patterns: '', gitignore: '' });
+    const cache = { index: a.index, scopeKey: 'test' };
+    const read = a.vault.readBinary.bind(a.vault);
+    const first = await scanner.scan(ignore, undefined, undefined, [], undefined, cache);
+    vi.spyOn(a.vault, 'readBinary').mockImplementationOnce(async path => {
+      const captured = await read(path);
+      a.vault.files.set('A.md', bytes('new')); // No event and equal metadata while the app was hidden.
+      a.index.invalidate('mobile-resume');
+      return captured;
+    });
+    const checked = await scanner.scan(ignore, undefined, undefined, [], undefined, { ...cache, forceFull: true });
+    expect(checked.verification).toBe('full');
+    expect(checked.files.find(file => file.path === 'A.md')!.sha).not.toBe(first.files.find(file => file.path === 'A.md')!.sha);
+    expect(a.index.snapshot().trusted).toBe(true);
+  });
   it('never trusts a checksum-valid saved index across a plugin restart', async () => {
     const a = await indexedDevice(files); await a.run(); await a.index.flush();
     const restart = new LocalChangeIndex(a.storage); await restart.load();

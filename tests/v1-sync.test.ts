@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SyncService } from '../src/sync/execution/SyncService';
 import { LocalStateStore } from '../src/sync/state/LocalStateStore';
 import { GitFixture, WritableVault } from './v1-harness';
@@ -48,6 +48,33 @@ describe('V1 real executor contract', () => {
     const remote = new GitFixture(); const a = await device(remote, { 'A.md': 'a' }); const p = await a.service.preview(options, 'test');
     a.vault.files.set('A.md', bytes('new')); await expect(a.service.execute(p, 'test')).rejects.toThrow();
     expect(remote.calls.some(c => c.method !== 'GET')).toBe(false); expect(a.state.current().baseManifest).toBeUndefined();
+  });
+  it('executes a reviewed plan after the Preview signal is aborted', async () => {
+    const remote = new GitFixture();
+    const a = await device(remote, { 'A.md': 'a' });
+    const view = new AbortController();
+    const preview = await a.service.preview(options, 'test', undefined, view.signal);
+    view.abort();
+    await a.service.execute(preview, 'test');
+    expect(remote.text('A.md')).toBe('a');
+    expect(a.state.current().baseRemoteCommit).toBe(remote.head);
+    expect(await a.service.transactions.active()).toBeNull();
+  });
+  it('stops before rescanning a reviewed plan if GitHub disconnects', async () => {
+    const remote = new GitFixture();
+    const a = await device(remote, { 'A.md': 'a' });
+    const transport = vi.fn(remote.transport);
+    const service = new SyncService(a.vault, transport, '.obsidian', a.state);
+    const preview = await service.preview(options, 'test');
+    const { listings, reads } = a.vault;
+    const before = { listings: listings.length, reads: reads.length, state: a.state.current() };
+    transport.mockRejectedValueOnce(new Error('offline'));
+    await expect(service.execute(preview, 'test')).rejects.toMatchObject({ stage: 'REMOTE_REF', code: 'NETWORK_ERROR' });
+    expect(listings).toHaveLength(before.listings);
+    expect(reads).toHaveLength(before.reads);
+    expect(a.state.current()).toEqual(before.state);
+    expect(await service.transactions.active()).toBeNull();
+    expect(remote.calls.every(call => call.method === 'GET')).toBe(true);
   });
   it('fails a competing GitHub writer without overwriting its commit', async () => {
     const remote = new GitFixture(); const a = await device(remote, { 'A.md': 'a' }); const p = await a.service.preview(options, 'test');

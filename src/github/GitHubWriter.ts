@@ -21,8 +21,8 @@ export class GitHubWriter {
   constructor(private readonly target: RepositoryTarget, private readonly token: string, private readonly transport: GitTransport, private readonly measurement?: SyncPerformance) {
     this.reader = new GitHubClient(target, token, transport);
   }
-  async head(): Promise<string> {
-    const value = await this.reader.get(`ref/heads/${this.target.branch.split('/').map(encodeURIComponent).join('/')}`, 'REMOTE_REF');
+  async head(signal?: AbortSignal, timeoutMs?: number): Promise<string> {
+    const value = await this.reader.get(`ref/heads/${this.target.branch.split('/').map(encodeURIComponent).join('/')}`, 'REMOTE_REF', signal, timeoutMs);
     if (!isRecord(value) || value.ref !== `refs/heads/${this.target.branch}` || !isRecord(value.object) || value.object.type !== 'commit' || !isSha(value.object.sha)) throw failed('INVALID_REF');
     return value.object.sha;
   }

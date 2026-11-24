@@ -65,6 +65,12 @@ export class VaultScanner {
   }
 
   async scan(ignore: IgnoreService, progress: Progress = () => {}, signal?: AbortSignal, excludedPaths: readonly string[] = [], fileProgress?: FileProgress, cache?: ScanCacheOptions): Promise<LocalSnapshot> {
+    // A hide and a resume can each invalidate an in-flight scan ticket.
+    return this.scanAttempt(ignore, progress, signal, excludedPaths, fileProgress, cache, 2);
+  }
+
+  private async scanAttempt(ignore: IgnoreService, progress: Progress, signal: AbortSignal | undefined, excludedPaths: readonly string[],
+    fileProgress: FileProgress | undefined, cache: ScanCacheOptions | undefined, lifecycleRestarts: number): Promise<LocalSnapshot> {
     try {
       const inventory = await this.inventory(ignore, signal);
       const files: LocalFile[] = [];
@@ -122,7 +128,7 @@ export class VaultScanner {
         if (reuse) { indexed.push(stored); this.measurement?.reused?.(); }
         if (samples.has(path) && stored && file && file.sha !== stored.sha) {
           index!.invalidate('integrity-sample-mismatch');
-          return this.scan(ignore, progress, signal, excludedPaths, fileProgress, { ...cache!, audit: false });
+          return this.scanAttempt(ignore, progress, signal, excludedPaths, fileProgress, { ...cache!, audit: false }, lifecycleRestarts);
         }
         if (file) { files.push(file); if (files.length % 25 === 0 || files.length === total) fileProgress?.(files.length, total); }
         if (files.length % 25 === 0) {
@@ -143,7 +149,12 @@ export class VaultScanner {
       assertActive(signal);
       if (issues.length) throw new LocalScanError(issues.some(d => d.problem === 'unreadable') ? 'READ_FAILED' : 'LOCAL_CHANGED',
         [...new Map(issues.map(d => [d.path, d])).values()], files);
-      if (ticket) await index!.accept(ticket, indexed);
+      if (ticket) {
+        if (lifecycleRestarts && index!.invalidatedByLifecycle(ticket)) {
+          return this.scanAttempt(ignore, progress, signal, excludedPaths, fileProgress, cache, lifecycleRestarts - 1);
+        }
+        await index!.accept(ticket, indexed);
+      }
       return { files, ignored, protectedDirectories: inventory.protectedDirectories, scannedAt: new Date().toISOString(),
         ...(ticket ? { verification: ticket.full ? 'full' as const : 'incremental' as const, indexWatermark: { revision: ticket.revision, epoch: ticket.epoch } } : {}) };
     } catch (error) {

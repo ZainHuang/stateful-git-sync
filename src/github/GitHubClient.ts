@@ -1,5 +1,7 @@
-import { assertActive, PreviewError, readWithTimeout } from '../errors';
+import { assertActive, DEFAULT_READ_TIMEOUT_MS, PreviewError, readWithTimeout } from '../errors';
 import type { GetTransport, RepositoryTarget } from './types';
+
+export const GITHUB_CONNECTION_TIMEOUT_MS = 10_000;
 
 function hasForbiddenBranchCharacter(value: string): boolean {
   return [...value].some(character => {
@@ -28,7 +30,7 @@ export class GitHubClient {
     this.base = `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/git/`;
   }
 
-  async get(resource: string, stage: string, signal?: AbortSignal): Promise<unknown> {
+  async get(resource: string, stage: string, signal?: AbortSignal, timeoutMs = DEFAULT_READ_TIMEOUT_MS): Promise<unknown> {
     assertActive(signal);
     if (!/^(ref\/heads\/|commits\/|trees\/)/.test(resource) && !/^blobs\/[a-f0-9]{40}$/.test(resource)) {
       throw new PreviewError(stage, 'INVALID_RESOURCE', 'Unsupported read endpoint.');
@@ -44,7 +46,7 @@ export class GitHubClient {
     if (resource.startsWith('ref/')) headers['Cache-Control'] = 'no-cache, no-store';
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     try {
-      const response = await readWithTimeout(() => this.transport({ url: this.base + resource, method: 'GET', headers, throw: false }), stage, signal);
+      const response = await readWithTimeout(() => this.transport({ url: this.base + resource, method: 'GET', headers, throw: false }), stage, signal, undefined, timeoutMs);
       assertActive(signal);
       if (response.status !== 200) {
         const hints: Record<number, string> = {
@@ -59,7 +61,7 @@ export class GitHubClient {
       return response.json;
     } catch (error) {
       if (error instanceof PreviewError && error.code === 'READ_TIMEOUT') {
-        throw new PreviewError(stage, 'NETWORK_TIMEOUT', 'GitHub did not respond within 30 seconds. Check your connection and retry Preview.');
+        throw new PreviewError(stage, 'NETWORK_TIMEOUT', `GitHub did not respond within ${timeoutMs / 1_000} seconds. Check your connection and retry Preview.`);
       }
       if (error instanceof PreviewError) throw error;
       throw new PreviewError(stage, 'NETWORK_ERROR', 'GitHub could not be read. Check your connection and retry Preview.');
