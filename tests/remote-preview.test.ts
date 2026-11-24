@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { safeError } from '../src/errors';
 import { GitHubClient, validateTarget } from '../src/github/GitHubClient';
+import { GitHubWriter } from '../src/github/GitHubWriter';
 import { RemoteTreeReader } from '../src/github/RemoteTreeReader';
-import type { GetRequest, GetTransport } from '../src/github/types';
+import type { GetRequest, GetTransport, GitTransport } from '../src/github/types';
 import { PreviewService } from '../src/sync/PreviewService';
 import { DEFAULT_SETTINGS } from '../src/settings/settings';
 import { TokenStore } from '../src/settings/TokenStore';
@@ -24,6 +25,22 @@ describe('GitHub read deadlines', () => {
     expect(outcome.mock.calls.flat().join(' ')).not.toContain('private-token');
     finish({ status: 200, json: { stale: true } }); await pending;
     expect(outcome).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('allows a supported attachment with a valid SHA to finish after 30 seconds', async () => {
+    const content = Buffer.alloc(6 * 1024 * 1024, 0xab);
+    const sha = referenceSha(content);
+    const transport = vi.fn<GitTransport>(() => new Promise(resolve => setTimeout(() => {
+      resolve({ status: 200, json: { sha, size: content.length, encoding: 'base64', content: content.toString('base64') } });
+    }, 35_000)));
+    vi.useFakeTimers();
+    const writer = new GitHubWriter(target, '', transport);
+    const result = writer.download(sha, { expectedSize: content.length }).then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(35_000);
+    const downloaded = await result;
+    if ('error' in downloaded) throw downloaded.error;
+    expect(referenceSha(downloaded.value)).toBe(sha);
     expect(transport).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });

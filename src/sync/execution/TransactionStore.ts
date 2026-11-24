@@ -127,17 +127,26 @@ export class TransactionStore {
     if (await this.vault.readInternal(`${ROOT}/active.json`) !== null) throw recoveryError();
   }
   async putBlob(id: string, bytes: Uint8Array) {
-    this.directory(id);
-    const sha = gitBlobSha(bytes, this.measurement); const path = `${ROOT}/objects/blobs/${sha}`;
-    if (await this.vault.readInternal(path) !== null) { await this.blob(id, sha); return sha; }
-    await this.write(path, encodeBytes(bytes)); return sha;
+    const sha = gitBlobSha(bytes, this.measurement);
+    if (await this.cachedBlob(id, sha)) return sha;
+    await this.write(`${ROOT}/objects/blobs/${sha}`, encodeBytes(bytes));
+    return sha;
   }
   async blob(id: string, sha: string): Promise<Uint8Array> {
-    if (!isSha(sha)) throw recoveryError();
+    const bytes = await this.cachedBlob(id, sha);
+    if (!bytes) throw recoveryError();
+    return bytes;
+  }
+  async cachedBlob(id: string, sha: string): Promise<Uint8Array | null> {
     this.directory(id);
+    if (!isSha(sha)) throw recoveryError();
     const text = await this.vault.readInternal(`${ROOT}/objects/blobs/${sha}`);
-    try { if (text === null) throw recoveryError(); const bytes = decodeBytes(text); if (gitBlobSha(bytes, this.measurement) !== sha) throw recoveryError(); return bytes; }
-    catch { throw recoveryError(); }
+    if (text === null) return null;
+    try {
+      const bytes = decodeBytes(text);
+      if (gitBlobSha(bytes, this.measurement) !== sha) throw recoveryError();
+      return bytes;
+    } catch { throw recoveryError(); }
   }
   private async write(path: string, contents: string) {
     await this.vault.writeInternal(path, contents);

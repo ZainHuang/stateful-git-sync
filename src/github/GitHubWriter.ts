@@ -1,4 +1,4 @@
-import { PreviewError } from '../errors';
+import { DEFAULT_READ_TIMEOUT_MS, PreviewError, readWithTimeout } from '../errors';
 import { gitBlobSha } from '../vault/HashService';
 import { isRecord, isSha } from '../sync/manifest/ManifestValidator';
 import { GitHubClient } from './GitHubClient';
@@ -9,6 +9,8 @@ export { decodeBytes, encodeBytes } from './BinaryCodec';
 
 // Bound memory use on iPhone; larger attachments must be excluded explicitly.
 export const MAX_SYNC_FILE_BYTES = 20 * 1024 * 1024;
+const BLOB_DOWNLOAD_RETRY_DELAY_MS = 1_000;
+const BLOB_DOWNLOAD_BYTES_PER_SECOND = 256 * 1024;
 const failed = (code: string) => new PreviewError('GITHUB_SYNC', code, 'GitHub sync could not be verified. Recovery data is retained; refresh or resume the transaction.');
 export type PublishEvent = { at: string } & (
   { kind: 'commit-created'; commit: string }
@@ -26,10 +28,24 @@ export class GitHubWriter {
     if (!isRecord(value) || value.ref !== `refs/heads/${this.target.branch}` || !isRecord(value.object) || value.object.type !== 'commit' || !isSha(value.object.sha)) throw failed('INVALID_REF');
     return value.object.sha;
   }
-  async download(sha: string): Promise<Uint8Array> {
-    const value = await this.reader.get(`blobs/${sha}`, 'REMOTE_BLOB');
+  async download(sha: string, { expectedSize, signal }: { expectedSize?: number; signal?: AbortSignal } = {}): Promise<Uint8Array> {
+    if (expectedSize !== undefined && expectedSize > MAX_SYNC_FILE_BYTES) throw failed('FILE_TOO_LARGE');
+    // Budget for Base64 transfer over a slow mobile connection plus request overhead.
+    const encodedSize = Math.ceil((expectedSize ?? 0) / 3) * 4;
+    const timeoutMs = Math.max(DEFAULT_READ_TIMEOUT_MS, (10 + Math.ceil(encodedSize / BLOB_DOWNLOAD_BYTES_PER_SECOND)) * 1_000);
+    const read = () => this.reader.get(`blobs/${sha}`, 'REMOTE_BLOB', signal, timeoutMs);
+    let value: unknown;
+    try { value = await read(); }
+    catch (error) {
+      // This GET addresses immutable bytes. Permissions, rate limits and writes use their existing handling.
+      if (!(error instanceof PreviewError) || !/^(NETWORK_(ERROR|TIMEOUT)|HTTP_(408|5\d{2}))$/.test(error.code)) throw error;
+      const timerWindow = typeof window === 'undefined' ? { setTimeout } : window;
+      await readWithTimeout(() => new Promise<void>(resolve => { timerWindow.setTimeout(resolve, BLOB_DOWNLOAD_RETRY_DELAY_MS); }), 'REMOTE_BLOB', signal);
+      value = await read();
+    }
     if (!isRecord(value) || value.sha !== sha || value.encoding !== 'base64' || typeof value.content !== 'string'
-      || typeof value.size !== 'number' || value.size > MAX_SYNC_FILE_BYTES || value.content.length > MAX_SYNC_FILE_BYTES * 1.5) throw failed('INVALID_BLOB');
+      || typeof value.size !== 'number' || value.size > MAX_SYNC_FILE_BYTES || value.content.length > MAX_SYNC_FILE_BYTES * 1.5
+      || (expectedSize !== undefined && value.size !== expectedSize)) throw failed('INVALID_BLOB');
     let bytes: Uint8Array;
     try { bytes = decodeBytes(value.content); } catch { throw failed('INVALID_BLOB'); }
     if (bytes.length !== value.size || gitBlobSha(bytes, this.measurement) !== sha) throw failed('BLOB_HASH_MISMATCH');

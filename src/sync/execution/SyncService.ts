@@ -145,7 +145,9 @@ export class SyncService {
     const local = capture.local.files.find(f => f.path === entry.path && f.sha === entry.localSha)
       ?? capture.local.files.find(f => f.sha === entry.localSha);
     const l = local ? render(new Uint8Array(await this.vault.readBinary(local.path))) : '[Deleted or identity uncertain]';
-    const r = remote && !remote.deleted ? render(await new GitHubWriter(options, token, this.transport, this.performance).download(remote.blobSha!)) : '[Deleted or not present]';
+    const remoteBlob = remote && !remote.deleted ? capture.remote.entries.find(entry => entry.type === 'blob' && entry.sha === remote.blobSha) : undefined;
+    const r = remote && !remote.deleted ? render(await new GitHubWriter(options, token, this.transport, this.performance)
+      .download(remote.blobSha!, { expectedSize: remoteBlob?.size, signal })) : '[Deleted or not present]';
     return `LOCAL · ${local?.path ?? entry.path}\n${l}\n\nREMOTE · ${remote?.path ?? entry.path}\n${r}`;
   }
   private result(session: Session): SyncPreview {
@@ -206,10 +208,25 @@ export class SyncService {
         if (gitBlobSha(bytes, this.performance) !== sha) throw fail('LOCAL_CHANGED', 'Local bytes changed. Refresh Preview.');
         await this.transactions.putBlob(id, bytes); staged.add(sha);
       }
+      const remoteBlobs = new Map(capture.remote.entries
+        .filter(f => f.type === 'blob' && !capture.ignore.reason(f.path) && !e.excludedPaths.includes(f.path) && (!incremental || retainedPaths.has(f.path)))
+        .map(f => [f.sha, f]));
       const retained = new Set([...Object.entries(e.after).filter(([path]) => !incremental || retainedPaths.has(path)).map(([, sha]) => sha),
-        ...capture.remote.entries.filter(f => f.type === 'blob' && !capture.ignore.reason(f.path) && !e.excludedPaths.includes(f.path) && (!incremental || retainedPaths.has(f.path))).map(f => f.sha)]);
+        ...remoteBlobs.keys()]);
       for (const sha of retained) {
-        assertActive(signal); if (!staged.has(sha)) { await this.transactions.putBlob(id, await github.download(sha)); staged.add(sha); }
+        assertActive(signal);
+        if (staged.has(sha)) continue;
+        const remoteBlob = remoteBlobs.get(sha);
+        if (!await this.transactions.cachedBlob(id, sha)) {
+          const bytes = await github.download(sha, { expectedSize: remoteBlob?.size, signal }).catch((error: unknown) => {
+            if (remoteBlob && error instanceof PreviewError && error.stage === 'REMOTE_BLOB') {
+              throw new PreviewError(error.stage, error.code, `Could not download ${remoteBlob.path}. ${error.message}`);
+            }
+            throw error;
+          });
+          await this.transactions.putBlob(id, bytes);
+        }
+        staged.add(sha);
       }
       if (uploadSnapshot) await capture.verifyScope(signal); else await capture.verify({ reuseIndex: stableLocalPlan, signal, progress });
       if (JSON.stringify(this.state.current()) !== session.stateKey) throw fail('STATE_CHANGED', 'Metadata changed. Refresh Preview.');

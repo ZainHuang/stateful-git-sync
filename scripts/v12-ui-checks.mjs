@@ -79,6 +79,31 @@ export async function verifyV12({ page, remote, report, runDir, preview, sync, c
   // Push-only published-snapshot special case.
   const vault = new WritableVault(); const peerState = new LocalStateStore({ read: () => vault.readInternal('state'), write: s => vault.writeInternal('state', s) }); await peerState.load();
   const peer = new SyncService(vault, remote.transport, '.obsidian', peerState); const peerRun = async () => peer.execute(await peer.preview(options, 'fixture'), 'fixture'); await peerRun();
+  const incoming = 'Performance/note-319.md';
+  vault.files.set(incoming, new TextEncoder().encode('# Downloaded after a transient error')); await peerRun();
+  const incomingSha = remote.contents()[incoming];
+  await page.evaluate(sha => {
+    const plugin = app.plugins.plugins['local-mirror-sync'];
+    const transport = plugin.sync.transport;
+    window.__lmsDownloadAttempts = 0;
+    plugin.sync.transport = async request => {
+      if (request.method === 'GET' && request.url.endsWith('/blobs/' + sha) && ++window.__lmsDownloadAttempts === 1) {
+        return new Promise(() => {});
+      }
+      return transport(request);
+    };
+    window.__lmsRestoreTransport = () => { plugin.sync.transport = transport; };
+  }, incomingSha);
+  await preview();
+  await getUI().getByRole('button', { name: 'Sync & Verify', exact: true }).click();
+  await getUI().getByText('Sync verified. BASE updated successfully.', { exact: true }).waitFor({ timeout: 75_000 });
+  await close();
+  assert.equal(await page.evaluate(() => window.__lmsDownloadAttempts), 2);
+  assert.equal(await page.evaluate(path => app.vault.adapter.read(path), incoming), '# Downloaded after a transient error');
+  assert.equal(await page.evaluate(() => app.plugins.plugins['local-mirror-sync'].sync.transactions.active()), null);
+  await page.evaluate(() => window.__lmsRestoreTransport());
+  report.checks.push('A transient GitHub blob failure retries that file and finishes the same confirmed 540-file Vault sync');
+
   vault.files.set('Performance/note-320.md', new TextEncoder().encode('# Recovery remote change')); await peerRun();
   await page.evaluate(async () => { await app.vault.modify(app.vault.getAbstractFileByPath('Performance/note-321.md'), '# Recovery local Push'); });
   const base = (await state()).baseRemoteCommit;

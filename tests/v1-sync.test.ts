@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SyncService } from '../src/sync/execution/SyncService';
+import type { GitTransport } from '../src/github/types';
 import { LocalStateStore } from '../src/sync/state/LocalStateStore';
 import { GitFixture, WritableVault } from './v1-harness';
 import { bytes, target } from './helpers';
@@ -76,6 +77,68 @@ describe('V1 real executor contract', () => {
     expect(await service.transactions.active()).toBeNull();
     expect(remote.calls.every(call => call.method === 'GET')).toBe(true);
   });
+  it('retries a timed-out pull blob and completes the same confirmed plan', async () => {
+    const remote = new GitFixture();
+    const source = await device(remote, { 'A.md': 'incoming' });
+    await source.sync();
+    const replica = await device(remote);
+    const blobUrl = `/blobs/${remote.contents()['A.md']}`;
+    let attempts = 0;
+    const transport: GitTransport = async request => {
+      if (request.method === 'GET' && request.url.endsWith(blobUrl) && ++attempts === 1) return new Promise(() => {});
+      return remote.transport(request);
+    };
+    const service = new SyncService(replica.vault, transport, '.obsidian', replica.state);
+    const plan = await service.preview(options, 'test');
+    const head = remote.head;
+    const afterPreview = remote.calls.length;
+    vi.useFakeTimers();
+    try {
+      const result = service.execute(plan, 'test').then(() => null, error => error);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(attempts).toBe(1);
+      expect(replica.vault.mutations).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(await result).toBeNull();
+      expect(attempts).toBe(2);
+      expect(replica.vault.files.get('A.md')).toEqual(bytes('incoming'));
+      expect(replica.state.current().baseRemoteCommit).toBe(head);
+      expect(remote.calls.slice(afterPreview).every(call => call.method === 'GET')).toBe(true);
+      expect(await service.transactions.active()).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('uses already verified recovery copies on the next attempt, even across a restart', async () => {
+    const remote = new GitFixture();
+    const source = await device(remote, { 'A.md': 'first incoming', 'B.md': 'second incoming' });
+    await source.sync();
+    const replica = await device(remote);
+    const first = `/blobs/${remote.contents()['A.md']}`;
+    const second = `/blobs/${remote.contents()['B.md']}`;
+    let permissionDenied = true;
+    const transport = vi.fn<GitTransport>(async request => {
+      if (permissionDenied && request.method === 'GET' && request.url.endsWith(second)) return { status: 403, json: null };
+      return remote.transport(request);
+    });
+    const service = new SyncService(replica.vault, transport, '.obsidian', replica.state);
+    const reviewed = await service.preview(options, 'test');
+    await expect(service.execute(reviewed, 'test')).rejects.toMatchObject({ stage: 'REMOTE_BLOB', code: 'HTTP_403', message: expect.stringContaining('B.md') });
+    expect(transport.mock.calls.filter(([request]) => request.url.endsWith(second))).toHaveLength(1);
+    expect(replica.vault.mutations).toEqual([]);
+    expect(replica.state.current().baseRemoteCommit).toBeUndefined();
+    expect(await service.transactions.active()).toBeNull();
+
+    permissionDenied = false;
+    const restarted = new SyncService(replica.vault, transport, '.obsidian', replica.state);
+    await restarted.execute(await restarted.preview(options, 'test'), 'test');
+    expect(transport.mock.calls.filter(([request]) => request.url.endsWith(first))).toHaveLength(1);
+    expect(transport.mock.calls.filter(([request]) => request.url.endsWith(second))).toHaveLength(2);
+    expect(replica.vault.files.get('A.md')).toEqual(bytes('first incoming'));
+    expect(replica.vault.files.get('B.md')).toEqual(bytes('second incoming'));
+    expect(replica.state.current().baseRemoteCommit).toBe(remote.head);
+  });
+
   it('fails a competing GitHub writer without overwriting its commit', async () => {
     const remote = new GitFixture(); const a = await device(remote, { 'A.md': 'a' }); const p = await a.service.preview(options, 'test');
     remote.beforePatch = () => remote.external({ 'other.md': 'concurrent' });
